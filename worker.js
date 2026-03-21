@@ -17,33 +17,70 @@ function json(data, init = {}) {
 
 async function persistSnapshot(db, pilots, observedAt) {
   if (!db || !pilots.length) return;
-
+  const rows = [];
   for (const pilot of pilots) {
     const callsign = String(pilot.callsign || "").trim().toUpperCase();
     if (!callsign || typeof pilot.latitude !== "number" || typeof pilot.longitude !== "number") continue;
+    rows.push({
+      callsign,
+      observedAt,
+      lat: pilot.latitude,
+      lon: pilot.longitude,
+      altitude: pilot.altitude || null,
+      groundspeed: pilot.groundspeed || null,
+      heading: pilot.heading || null,
+      squawk: pilot.transponder || null,
+      aircraftCode: (pilot.flight_plan && (pilot.flight_plan.aircraft_short || pilot.flight_plan.aircraft)) || null,
+    });
+  }
 
-    await db.batch([
-      db
-        .prepare(
-          "INSERT INTO aircraft_points (callsign, observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
-        )
-        .bind(
-          callsign,
-          observedAt,
-          pilot.latitude,
-          pilot.longitude,
-          pilot.altitude || null,
-          pilot.groundspeed || null,
-          pilot.heading || null,
-          pilot.transponder || null,
-          ((pilot.flight_plan && (pilot.flight_plan.aircraft_short || pilot.flight_plan.aircraft)) || null)
-        ),
-      db
-        .prepare(
-          "INSERT INTO latest_positions (callsign, observed_at, lat, lon) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(callsign) DO UPDATE SET observed_at = excluded.observed_at, lat = excluded.lat, lon = excluded.lon"
-        )
-        .bind(callsign, observedAt, pilot.latitude, pilot.longitude),
-    ]);
+  const chunkSize = 150;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+
+    const pointPlaceholders = [];
+    const pointBindings = [];
+    for (const row of chunk) {
+      pointPlaceholders.push("(?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      pointBindings.push(
+        row.callsign,
+        row.observedAt,
+        row.lat,
+        row.lon,
+        row.altitude,
+        row.groundspeed,
+        row.heading,
+        row.squawk,
+        row.aircraftCode
+      );
+    }
+
+    await db
+      .prepare(
+        `INSERT INTO aircraft_points (callsign, observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code)
+         VALUES ${pointPlaceholders.join(", ")}`
+      )
+      .bind(...pointBindings)
+      .run();
+
+    const latestPlaceholders = [];
+    const latestBindings = [];
+    for (const row of chunk) {
+      latestPlaceholders.push("(?, ?, ?, ?)");
+      latestBindings.push(row.callsign, row.observedAt, row.lat, row.lon);
+    }
+
+    await db
+      .prepare(
+        `INSERT INTO latest_positions (callsign, observed_at, lat, lon)
+         VALUES ${latestPlaceholders.join(", ")}
+         ON CONFLICT(callsign) DO UPDATE SET
+           observed_at = excluded.observed_at,
+           lat = excluded.lat,
+           lon = excluded.lon`
+      )
+      .bind(...latestBindings)
+      .run();
   }
 }
 
@@ -68,7 +105,13 @@ async function handleVatsim(env, ctx) {
   const pilots = Array.isArray(data.pilots) ? data.pilots : [];
   const observedAt = Date.parse((data.general && data.general.update_timestamp) || "") || Date.now();
 
-  if (env.DB) ctx.waitUntil(persistSnapshot(env.DB, pilots, observedAt));
+  if (env.DB) {
+    try {
+      await persistSnapshot(env.DB, pilots, observedAt);
+    } catch (error) {
+      return json({ error: "persist_failed", detail: String(error) }, { status: 502 });
+    }
+  }
 
   return json(data, {
     headers: {
