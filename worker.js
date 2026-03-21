@@ -46,7 +46,7 @@ function normalizePilotRows(pilots, observedAt) {
 
 async function persistLatestPositions(db, rows) {
   if (!db || !rows.length) return;
-  const chunkSize = 60;
+  const chunkSize = 30;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
 
