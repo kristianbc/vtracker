@@ -1,0 +1,14 @@
+{
+  "name": "vtracker-pages",
+  "compatibility_date": "2026-03-21",
+  "pages_build_output_dir": ".",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vtracker-db"
+    }
+  ],
+  "vars": {
+    "VATSIM_URL": "https://data.vatsim.net/v3/vatsim-data.json"
+  }
+}

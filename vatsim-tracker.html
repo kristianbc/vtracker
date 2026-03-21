@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VATSIM Radar</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a0e17;--panel:#0d1320;--border:#1e2d45;--accent:#00d4ff;--accent2:#ff6b35;--green:#39ff14;--text:#c8d8e8;--muted:#4a6080}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);font-family:'Barlow Condensed',sans-serif;color:var(--text);overflow:hidden;height:100vh;width:100vw}
+#map{width:100%;height:100%;background:#000}
+#topbar{position:absolute;top:0;left:0;right:0;height:50px;background:rgba(10,14,23,.95);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:18px;padding:0 18px;z-index:1000;backdrop-filter:blur(8px)}
+.logo{font-family:'Share Tech Mono',monospace;font-size:17px;color:var(--accent);letter-spacing:3px;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.logo-dot{width:7px;height:7px;background:var(--green);border-radius:50%;box-shadow:0 0 6px var(--green);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.6)}}
+.pill{display:flex;align-items:center;gap:5px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:3px;padding:3px 10px;font-size:11px;letter-spacing:1px;white-space:nowrap}
+.pill .lbl{color:var(--muted);text-transform:uppercase}
+.pill .val{color:var(--accent);font-family:'Share Tech Mono',monospace}
+#last-update{margin-left:auto;font-size:10px;color:var(--muted);font-family:'Share Tech Mono',monospace;white-space:nowrap}
+#refresh-btn{background:transparent;border:1px solid var(--accent);color:var(--accent);padding:4px 12px;border-radius:3px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:1px;text-transform:uppercase;transition:all .2s;white-space:nowrap}
+#refresh-btn:hover{background:var(--accent);color:var(--bg)}
+#refresh-btn:disabled{opacity:.35;cursor:wait}
+#cbar{position:absolute;top:50px;left:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--green));z-index:999;transition:width 1s linear;pointer-events:none}
+#panel{position:absolute;top:50px;right:0;width:310px;height:calc(100vh - 50px);background:rgba(10,14,23,.97);border-left:1px solid var(--border);backdrop-filter:blur(16px);z-index:900;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1)}
+#panel.open{transform:translateX(0)}
+.ph{padding:14px 16px 11px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start}
+.cs{font-size:24px;font-weight:700;color:#fff;letter-spacing:2px;font-family:'Share Tech Mono',monospace}
+.act{font-size:11px;color:var(--accent);letter-spacing:1px;margin-top:2px}
+#close-panel{background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;transition:color .2s;padding:2px}
+#close-panel:hover{color:#fff}
+.rrow{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.apt{font-size:20px;font-weight:700;color:#fff;font-family:'Share Tech Mono',monospace}
+.rar{flex:1;display:flex;align-items:center;gap:3px}
+.rl{flex:1;height:1px;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.rpl{color:var(--accent2);font-size:13px}
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);border-bottom:1px solid var(--border)}
+.sc{background:var(--panel);padding:10px 14px}
+.sc .sl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:3px}
+.sc .sv{font-size:17px;font-family:'Share Tech Mono',monospace;color:#fff}
+.sc .su{font-size:9px;color:var(--muted);margin-left:2px}
+.st{padding:10px 16px 5px;font-size:9px;text-transform:uppercase;letter-spacing:2px;color:var(--muted);border-bottom:1px solid var(--border)}
+.rt{padding:10px 16px;font-size:10px;color:var(--muted);font-family:'Share Tech Mono',monospace;line-height:1.7;word-break:break-all;overflow-y:auto;max-height:100px}
+.tleg{margin:10px 16px;padding:9px 12px;background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.12);border-radius:3px;font-size:10px;color:var(--muted)}
+.tb{height:2px;background:linear-gradient(90deg,#1a3a6e,#006fa8,#00b4d8,#00d8a0,#39ff14,#ffd700);border-radius:1px;margin-bottom:5px}
+.tll{display:flex;justify-content:space-between;font-size:9px}
+#sbox{position:absolute;top:62px;left:14px;z-index:950;display:flex}
+#si{background:rgba(10,14,23,.93);border:1px solid var(--border);border-right:none;color:var(--text);padding:6px 12px;font-family:'Share Tech Mono',monospace;font-size:12px;width:165px;outline:none;text-transform:uppercase;letter-spacing:1px;border-radius:3px 0 0 3px}
+#si::placeholder{color:var(--muted);text-transform:none}
+#si:focus{border-color:var(--accent)}
+#sb{background:var(--accent);border:1px solid var(--accent);color:var(--bg);padding:6px 12px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:600;letter-spacing:1px;border-radius:0 3px 3px 0}
+#sb:hover{opacity:.8}
+#ltog{position:absolute;top:62px;left:193px;z-index:950;display:flex;flex-direction:column;gap:3px}
+.lb{background:rgba(10,14,23,.93);border:1px solid var(--border);color:var(--text);padding:5px 10px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;border-radius:3px;transition:all .2s;white-space:nowrap}
+.lb.active{border-color:var(--accent);color:var(--accent)}
+.lb:hover{border-color:var(--accent)}
+.pt{background:rgba(10,14,23,.96)!important;border:1px solid var(--accent)!important;border-radius:3px!important;color:var(--text)!important;font-family:'Share Tech Mono',monospace!important;font-size:10px!important;padding:3px 7px!important;white-space:nowrap;box-shadow:0 0 8px rgba(0,212,255,.25)!important;line-height:1.6!important}
+#loading{position:absolute;inset:0;background:var(--bg);z-index:2000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
+.radar{position:relative;width:100px;height:100px}
+.radar::before,.radar::after{content:'';position:absolute;border-radius:50%;border:1px solid var(--accent)}
+.radar::before{inset:0;opacity:.25}
+.radar::after{inset:18px;opacity:.45}
+.sweep{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,transparent 295deg,rgba(0,212,255,.45) 360deg);animation:sw 2s linear infinite}
+@keyframes sw{to{transform:rotate(360deg)}}
+.rdot{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:5px;height:5px;background:var(--accent);border-radius:50%;box-shadow:0 0 10px var(--accent)}
+#lt{font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--accent);letter-spacing:3px;animation:bk 1s infinite}
+@keyframes bk{50%{opacity:.25}}
+#notif{position:absolute;bottom:18px;left:50%;transform:translateX(-50%) translateY(60px);background:rgba(10,14,23,.96);border:1px solid var(--accent);color:var(--text);padding:7px 18px;border-radius:3px;font-size:12px;z-index:1100;transition:transform .3s;white-space:nowrap}
+#notif.show{transform:translateX(-50%) translateY(0)}
+.leaflet-control-zoom{display:none}
+.leaflet-attribution-flag{display:none!important}
+.leaflet-control-attribution{background:rgba(10,14,23,.7)!important;color:var(--muted)!important;font-size:8px!important}
+.leaflet-control-attribution a{color:var(--accent)!important}
+.leaflet-container,.leaflet-grab{cursor:pointer!important}
+.leaflet-dragging .leaflet-container,.leaflet-dragging .leaflet-grab{cursor:grabbing!important}
+.trail-fix{background:transparent!important;border:none!important}
+.trail-fix span{display:block;border-radius:1px}
+.trail-hover-target{cursor:pointer!important}
+.leaflet-interactive{cursor:inherit!important}
+</style>
+</head>
+<body>
+<div id="loading"><div class="radar"><div class="sweep"></div><div class="rdot"></div></div><div id="lt">CONNECTING...</div></div>
+<div id="map"></div>
+<div id="cbar" style="width:100%"></div>
+<div id="topbar">
+  <div class="logo"><div class="logo-dot"></div>VATSIM RADAR</div>
+  <div class="pill"><span class="lbl">Online</span><span class="val" id="sp">—</span></div>
+  <div class="pill"><span class="lbl">ATC</span><span class="val" id="sa">—</span></div>
+  <span id="last-update">—</span>
+  <button id="refresh-btn" onclick="doRefresh()">↺ Refresh</button>
+</div>
+<div id="sbox">
+  <input id="si" type="text" placeholder="Callsign…"/>
+  <button id="sb" onclick="doSearch()">Find</button>
+</div>
+<div id="ltog">
+  <button class="lb active" id="btn-sat" onclick="setLayer('sat')">🛰 SAT</button>
+  <button class="lb" id="btn-dark" onclick="setLayer('dark')">🌑 DARK</button>
+  <button class="lb" id="btn-osm" onclick="setLayer('osm')">🗺 OSM</button>
+</div>
+<div id="panel">
+  <div class="ph">
+    <div><div class="cs" id="p-cs">—</div><div class="act" id="p-ac">—</div></div>
+    <button id="close-panel" onclick="closePanel()">✕</button>
+  </div>
+  <div class="rrow">
+    <div><div class="apt" id="p-dep">—</div><div style="font-size:9px;color:var(--muted);margin-top:1px">DEP</div></div>
+    <div class="rar"><div class="rl"></div><div class="rpl">✈</div><div class="rl"></div></div>
+    <div style="text-align:right"><div class="apt" id="p-arr">—</div><div style="font-size:9px;color:var(--muted);margin-top:1px">ARR</div></div>
+  </div>
+  <div class="sg">
+    <div class="sc"><div class="sl">Altitude</div><div class="sv" id="p-alt">—</div></div>
+    <div class="sc"><div class="sl">Speed</div><div class="sv" id="p-spd">—<span class="su">kts</span></div></div>
+    <div class="sc"><div class="sl">Heading</div><div class="sv" id="p-hdg">—<span class="su">°</span></div></div>
+    <div class="sc"><div class="sl">Squawk</div><div class="sv" id="p-sqk">—</div></div>
+    <div class="sc"><div class="sl">Lat</div><div class="sv" id="p-lat" style="font-size:12px">—</div></div>
+    <div class="sc"><div class="sl">Lon</div><div class="sv" id="p-lon" style="font-size:12px">—</div></div>
+  </div>
+  <div class="st">Filed Route</div>
+  <div class="rt" id="p-rt">No route filed</div>
+  <div class="tleg">
+    <div class="tb"></div>
+    <div class="tll"><span>◀ Oldest</span><span>Newest ▶</span></div>
+    <div style="margin-top:5px;font-size:9px;color:var(--muted)">Dense when turning · sparse when straight</div>
+  </div>
+</div>
+<div id="notif"></div>
+
+<script>
+'use strict';
+
+// ─── FETCH ────────────────────────────────────────────────────────────────────
+var VURL = 'https://data.vatsim.net/v3/vatsim-data.json';
+var API_BASE = (window.VTRACKER_API_BASE || '').replace(/\/+$/, '');
+var HISTORY_LIMIT = 4000;
+var PROXIES = [
+  function(u){ return 'https://api.allorigins.win/raw?url='+encodeURIComponent(u); },
+  function(u){ return 'https://corsproxy.io/?url='+encodeURIComponent(u); },
+  function(u){ return 'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u); }
+];
+function apiUrl(path) {
+  return API_BASE ? (API_BASE + path) : path;
+}
+async function doFetch() {
+  if (API_BASE || location.protocol !== 'file:') {
+    try {
+      var direct = await fetch(apiUrl('/api/vatsim'), {cache:'no-store'});
+      if (direct.ok) return direct;
+    } catch(e) {}
+  }
+  for (var i = 0; i < PROXIES.length; i++) {
+    try {
+      var c = new AbortController();
+      var t = setTimeout(function(){ c.abort(); }, 8000);
+      var r = await fetch(PROXIES[i](VURL), {signal:c.signal, cache:'no-store'});
+      clearTimeout(t);
+      if (r.ok) return r;
+    } catch(e) {}
+  }
+  throw new Error('all proxies failed');
+}
+
+// ─── MATH ─────────────────────────────────────────────────────────────────────
+var D2R = Math.PI / 180, Rnm = 3440.065;
+function deadReckon(lat, lon, hdg, kts, hrs) {
+  var d = kts * hrs;
+  if (d < 1e-5) return [lat, lon];
+  var phi = lat*D2R, lam = lon*D2R, b = hdg*D2R, dr = d/Rnm;
+  var phi2 = Math.asin(Math.sin(phi)*Math.cos(dr) + Math.cos(phi)*Math.sin(dr)*Math.cos(b));
+  var lam2 = lam + Math.atan2(Math.sin(b)*Math.sin(dr)*Math.cos(phi), Math.cos(dr)-Math.sin(phi)*Math.sin(phi2));
+  return [phi2/D2R, ((lam2/D2R+540)%360)-180];
+}
+function angleDiff(a, b) { // shortest angular distance a→b
+  return Math.abs(((b - a + 540) % 360) - 180);
+}
+function segmentAngle(a, b) {
+  var dy = b[0] - a[0];
+  var dx = b[1] - a[1];
+  return Math.atan2(dy, dx) * 180 / Math.PI;
+}
+function distSq(a, b) {
+  var dy = a[0] - b[0];
+  var dx = a[1] - b[1];
+  return dy * dy + dx * dx;
+}
+function headingSpeedToDelta(lat, hdg, kts) {
+  var nmPerMs = (kts || 0) / 3600000;
+  var br = (hdg || 0) * D2R;
+  var northNm = Math.cos(br) * nmPerMs;
+  var eastNm = Math.sin(br) * nmPerMs;
+  var cosLat = Math.cos(lat * D2R);
+  if (Math.abs(cosLat) < 1e-6) cosLat = cosLat < 0 ? -1e-6 : 1e-6;
+  return [
+    northNm / 60,
+    eastNm / (60 * cosLat)
+  ];
+}
+function hermitePoint(p0, p1, m0, m1, t) {
+  var t2 = t * t, t3 = t2 * t;
+  var h00 = 2 * t3 - 3 * t2 + 1;
+  var h10 = t3 - 2 * t2 + t;
+  var h01 = -2 * t3 + 3 * t2;
+  var h11 = t3 - t2;
+  return [
+    h00 * p0[0] + h10 * m0[0] + h01 * p1[0] + h11 * m1[0],
+    h00 * p0[1] + h10 * m0[1] + h01 * p1[1] + h11 * m1[1]
+  ];
+}
+function hermiteVelocity(p0, p1, m0, m1, t, durationMs) {
+  var t2 = t * t;
+  var dh00 = 6 * t2 - 6 * t;
+  var dh10 = 3 * t2 - 4 * t + 1;
+  var dh01 = -6 * t2 + 6 * t;
+  var dh11 = 3 * t2 - 2 * t;
+  var invDur = durationMs > 0 ? 1 / durationMs : 0;
+  return [
+    (dh00 * p0[0] + dh10 * m0[0] + dh01 * p1[0] + dh11 * m1[0]) * invDur,
+    (dh00 * p0[1] + dh10 * m0[1] + dh01 * p1[1] + dh11 * m1[1]) * invDur
+  ];
+}
+function currentMotionVelocity(motion, nowMs) {
+  if (!motion) return [0, 0];
+  var duration = motion.duration || 0;
+  if (duration <= 0) return motion.v1 || [0, 0];
+  var t = Math.max(0, Math.min(1, (nowMs - motion.start) / duration));
+  var m0 = [(motion.v0 || [0, 0])[0] * duration, (motion.v0 || [0, 0])[1] * duration];
+  var m1 = [(motion.v1 || [0, 0])[0] * duration, (motion.v1 || [0, 0])[1] * duration];
+  return hermiteVelocity(motion.from, motion.to, m0, m1, t, duration);
+}
+function getDisplayedTrail(cs, nowMs) {
+  var samples = gSamples[cs] || [];
+  if (!samples.length) return [];
+  if (samples.length === 1) return [[samples[0].lat, samples[0].lon]];
+
+  var displayTime = nowMs - gPlaybackDelay;
+  var pts = [];
+  var i;
+
+  for (i = 0; i < samples.length; i++) {
+    if (samples[i].t <= displayTime) pts.push([samples[i].lat, samples[i].lon]);
+    else break;
+  }
+
+  if (i === 0) return [[samples[0].lat, samples[0].lon]];
+  if (i >= samples.length) {
+    if (samples.length >= 2) {
+      var la = samples[samples.length - 2];
+      var lb = samples[samples.length - 1];
+      var lspan = Math.max(1, lb.t - la.t);
+      var lt = (displayTime - lb.t) / lspan;
+      if (lt > 0) {
+        pts.push([
+          lb.lat + (lb.lat - la.lat) * lt,
+          lb.lon + (lb.lon - la.lon) * lt
+        ]);
+      }
+    }
+    return pts;
+  }
+
+  var a = samples[i - 1];
+  var b = samples[i];
+  var span = Math.max(1, b.t - a.t);
+  var t = Math.max(0, Math.min(1, (displayTime - a.t) / span));
+  var interp = [
+    a.lat + (b.lat - a.lat) * t,
+    a.lon + (b.lon - a.lon) * t
+  ];
+  var last = pts[pts.length - 1];
+  if (!last || Math.abs(last[0] - interp[0]) > 1e-8 || Math.abs(last[1] - interp[1]) > 1e-8) pts.push(interp);
+  return pts;
+}
+function buildLinePath(pts, zoom) {
+  if (!pts || pts.length < 4) return pts || [];
+  var segs = zoom <= 6 ? 5 : (zoom <= 9 ? 3 : 2);
+  var out = [pts[0]];
+  for (var i = 0; i < pts.length - 1; i++) {
+    var p0 = pts[Math.max(0, i - 1)];
+    var p1 = pts[i];
+    var p2 = pts[i + 1];
+    var p3 = pts[Math.min(pts.length - 1, i + 2)];
+    for (var s = 1; s <= segs; s++) {
+      var t = s / segs;
+      var t2 = t * t;
+      var t3 = t2 * t;
+      out.push([
+        0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+        0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
+      ]);
+    }
+  }
+  return out;
+}
+function hoverRadiusForZoom() {
+  if (!gMap) return 7;
+  return Math.max(4, Math.min(7.5, 10 - gMap.getZoom() * 0.45));
+}
+function mergeStoredSamples(cs, rows) {
+  if (!rows || !rows.length) return;
+  var merged = [];
+  var seen = Object.create(null);
+  (rows || []).forEach(function(r) {
+    if (typeof r.lat !== 'number' || typeof r.lon !== 'number') return;
+    var t = Number(r.observed_at || r.t || 0);
+    var key = t + '|' + r.lat + '|' + r.lon;
+    if (seen[key]) return;
+    seen[key] = 1;
+    merged.push({lat: r.lat, lon: r.lon, t: t});
+  });
+  (gSamples[cs] || []).forEach(function(r) {
+    var t = Number(r.t || r.observed_at || 0);
+    var key = t + '|' + r.lat + '|' + r.lon;
+    if (seen[key]) return;
+    seen[key] = 1;
+    merged.push({lat: r.lat, lon: r.lon, t: t});
+  });
+  merged.sort(function(a, b){ return a.t - b.t; });
+  if (merged.length > HISTORY_LIMIT) merged = merged.slice(merged.length - HISTORY_LIMIT);
+  gSamples[cs] = merged;
+  gTrailPts[cs] = merged.map(function(r){ return [r.lat, r.lon]; });
+}
+async function loadStoredHistory(cs) {
+  if (!cs || gHistoryLoaded[cs] || gHistoryLoading[cs]) return;
+  if (!(API_BASE || location.protocol !== 'file:')) return;
+  gHistoryLoading[cs] = true;
+  try {
+    var r = await fetch(apiUrl('/api/history?callsign=' + encodeURIComponent(cs) + '&limit=' + HISTORY_LIMIT), {cache:'no-store'});
+    if (!r.ok) return;
+    var data = await r.json();
+    mergeStoredSamples(cs, data.points || []);
+    gHistoryLoaded[cs] = true;
+    if (gSelected === cs) redrawTrail();
+  } catch (e) {
+    console.warn('history load failed', e);
+  } finally {
+    delete gHistoryLoading[cs];
+  }
+}
+
+// ─── PLANE ICON — Canvas-drawn FR24 silhouette ────────────────────────────────
+var IC = {};
+var gSpriteImage = null;
+function makePlaneIcon(hdg, sel) {
+  var key = (Math.round(hdg/2)*2) + '_' + (sel?1:0);
+  if (IC[key]) return IC[key];
+
+  var sz  = sel ? 30 : 22;
+  var cnv = document.createElement('canvas');
+  cnv.width = cnv.height = sz;
+  var ctx = cnv.getContext('2d');
+  var s   = sz / 30; // scale to canvas size
+
+  ctx.save();
+  ctx.translate(sz/2, sz/2);
+  ctx.rotate(hdg * D2R);
+
+  // Glow
+  ctx.shadowColor = sel ? 'rgba(255,100,30,.9)' : 'rgba(0,200,255,.55)';
+  ctx.shadowBlur  = sel ? 7 : 3;
+
+  ctx.fillStyle   = sel ? '#ff6820' : '#ffffff';
+  ctx.strokeStyle = sel ? 'rgba(255,80,0,.2)' : 'rgba(150,220,255,.2)';
+  ctx.lineWidth   = 0.6;
+
+  // Top-down airliner silhouette — nose points UP (negative Y)
+  ctx.beginPath();
+  ctx.moveTo(0,       -12*s);   // nose tip
+  // right wing sweep
+  ctx.bezierCurveTo( 1*s, -7*s,  11*s, -2*s,  11*s,  0);
+  ctx.bezierCurveTo( 11*s, 1.5*s, 4.5*s, 3*s,  2.5*s, 4*s);
+  // right fuselage
+  ctx.lineTo(2*s,   7*s);
+  // right stabilizer
+  ctx.bezierCurveTo(2*s, 8*s,  6.5*s,  8.5*s, 6.5*s, 10*s);
+  ctx.bezierCurveTo(6.5*s, 11.5*s, 2.5*s, 11.5*s, 1.5*s, 10.5*s);
+  // tail
+  ctx.lineTo(1*s,   12*s);
+  ctx.lineTo(0,     11.5*s);
+  ctx.lineTo(-1*s,  12*s);
+  ctx.lineTo(-1.5*s, 10.5*s);
+  ctx.bezierCurveTo(-2.5*s, 11.5*s, -6.5*s, 11.5*s, -6.5*s, 10*s);
+  ctx.bezierCurveTo(-6.5*s, 8.5*s, -2*s, 8*s, -2*s, 7*s);
+  // left fuselage
+  ctx.lineTo(-2.5*s, 4*s);
+  ctx.bezierCurveTo(-4.5*s, 3*s, -11*s, 1.5*s, -11*s, 0);
+  ctx.bezierCurveTo(-11*s, -2*s, -1*s, -7*s, 0, -12*s);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  var icon = L.icon({
+    iconUrl:    cnv.toDataURL(),
+    iconSize:   [sz, sz],
+    iconAnchor: [sz/2, sz/2]
+  });
+  IC[key] = icon;
+  return icon;
+}
+
+var ICON_SVGS = {
+  narrow: '<path d="M32 4 L35 16 L53 23 L53 28 L37 27 L35 38 L41 53 L37 58 L32 46 L27 58 L23 53 L29 38 L27 27 L11 28 L11 23 L29 16 Z"/>',
+  wide: '<path d="M32 3 L36 17 L58 24 L58 30 L38 29 L36 40 L44 56 L39 61 L32 48 L25 61 L20 56 L28 40 L26 29 L6 30 L6 24 L28 17 Z"/>',
+  regional: '<path d="M32 6 L34 17 L47 22 L47 26 L36 26 L34 38 L39 50 L36 54 L32 44 L28 54 L25 50 L30 38 L28 26 L17 26 L17 22 L30 17 Z"/>',
+  bizjet: '<path d="M32 5 L34 16 L44 20 L50 22 L50 25 L37 25 L35 35 L41 47 L37 51 L32 42 L27 51 L23 47 L29 35 L27 25 L14 25 L14 22 L20 20 L30 16 Z"/>',
+  turboprop: '<path d="M32 6 L34 16 L43 20 L43 24 L36 24 L34 38 L39 50 L35 54 L32 44 L29 54 L25 50 L30 38 L28 24 L21 24 L21 20 L30 16 Z"/><path d="M46 18 h7 M49 15 v6 M11 18 h7 M14 15 v6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
+  fighter: '<path d="M32 4 L36 18 L48 24 L41 28 L39 39 L45 51 L39 54 L32 42 L25 54 L19 51 L25 39 L23 28 L16 24 L28 18 Z"/>',
+  heli: '<path d="M28 16 h20 a4 4 0 0 1 4 4 v8 a4 4 0 0 1 -4 4 H36 l-6 10 h-5 l3-10 h-4 a4 4 0 0 1 -4 -4 v-8 a4 4 0 0 1 4 -4 h4 Z"/><path d="M6 19 H58 M32 8 V19 M17 12 l8 7 M47 12 l-8 7 M22 45 h20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
+  glider: '<path d="M32 7 L34 18 L60 23 L60 26 L34 24 L33 41 L37 51 L34 54 L32 45 L30 54 L27 51 L31 41 L30 24 L4 26 L4 23 L30 18 Z"/>',
+  drone: '<circle cx="20" cy="20" r="4"/><circle cx="44" cy="20" r="4"/><circle cx="20" cy="44" r="4"/><circle cx="44" cy="44" r="4"/><path d="M24 24 L40 40 M40 24 L24 40" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/>'
+};
+var AIRCRAFT_GROUPS = {
+  heli: ['B412','B429','B430','B505','EC35','EC45','EC55','EC75','H125','H130','H135','H145','H160','R44','R66','S92','UH60','A109','A139'],
+  glider: ['GLID','DG10','DG50','ASK21','ASW2','DUOD'],
+  fighter: ['F16','F18','FA18','F22','F35','EUFI','TYPH','M346','L39','A10','SU27','MIG2','MIG3','T38'],
+  drone: ['UAV','DRON','MQ9','RQ4'],
+  turboprop: ['DH8D','DH8C','DH8A','AT72','AT76','AT45','AT43','AT46','SF34','C208','PC12','BE20','B190','JS32','E120','L410'],
+  bizjet: ['C25A','C25B','C25C','C25M','C500','C510','C525','C550','C560','C650','C680','C700','CL30','CL35','CL60','E35L','E45X','E50P','E55P','FA50','FA7X','F2TH','F900','GL5T','GL6T','HDJT','LJ35','LJ45','LJ60'],
+  regional: ['CRJ2','CRJ7','CRJ9','CRJX','E170','E175','E190','E195','F100','F70'],
+  wide: ['A332','A333','A339','A342','A343','A345','A346','A359','A35K','A388','B741','B742','B743','B744','B748','B763','B764','B772','B773','B77L','B77W','B788','B789','B78X','MD11']
+};
+function aircraftCodeOf(p) {
+  var fp = p && p.flight_plan;
+  var raw = (fp && (fp.aircraft_short || fp.aircraft)) || '';
+  var m = String(raw).toUpperCase().match(/[A-Z0-9]{3,4}/);
+  return m ? m[0] : '';
+}
+function iconTypeForPilot(p) {
+  var code = aircraftCodeOf(p);
+  if (!code) return 'narrow';
+  for (var kind in AIRCRAFT_GROUPS) if (AIRCRAFT_GROUPS[kind].indexOf(code) !== -1) return kind;
+  if (/^(B7|A3|A2)/.test(code)) return 'narrow';
+  if (/^(C1|C2|C3|LJ|BE|PC|FA|GL|CL)/.test(code)) return 'bizjet';
+  return 'narrow';
+}
+function makePlaneIcon(hdg, sel, p) {
+  var type = iconTypeForPilot(p || {});
+  var emergency = String((p && p.transponder) || '') === '7700';
+  var key = 'svg_' + (Math.round(hdg/2)*2) + '_' + (sel?1:0) + '_' + type + '_' + (emergency?1:0);
+  if (IC[key]) return IC[key];
+  var sz = sel ? 34 : 24;
+  var fill = emergency ? '#ff3b30' : (sel ? '#ff6820' : '#ffd33d');
+  var stroke = emergency ? '#7f120c' : (sel ? '#7a2f00' : '#604b00');
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + sz + '" height="' + sz + '" viewBox="0 0 64 64">'
+    + '<g transform="rotate(' + hdg + ' 32 32)" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" color="' + fill + '">'
+    + (ICON_SVGS[type] || ICON_SVGS.narrow)
+    + '</g></svg>';
+  var icon = L.icon({
+    iconUrl: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
+    iconSize: [sz, sz],
+    iconAnchor: [sz/2, sz/2]
+  });
+  IC[key] = icon;
+  return icon;
+}
+
+var ICON_SPRITES = {
+  narrow:     {x:151,  y:532, w:92,  h:120},
+  wide:       {x:647,  y:532, w:89,  h:132},
+  regional:   {x:892,  y:390, w:92,  h:107},
+  bizjet:     {x:377,  y:405, w:96,  h:82},
+  turboprop:  {x:535,  y:255, w:68,  h:84},
+  fighter:    {x:649,  y:246, w:78,  h:101},
+  heli:       {x:241,  y:244, w:97,  h:105},
+  glider:     {x:364,  y:263, w:144, h:40},
+  drone:      {x:1103, y:256, w:77,  h:83}
+};
+var SPRITE_W = 1280, SPRITE_H = 722;
+function iconMaxDim(sel) {
+  var z = gMap ? gMap.getZoom() : 3;
+  var base = sel ? 24 : 18;
+  var grown = base + Math.max(0, z - 3) * 2.2;
+  return Math.max(base, Math.min(sel ? 52 : 40, grown));
+}
+function makePlaneIcon(hdg, sel, p) {
+  var type = iconTypeForPilot(p || {});
+  var emergency = String((p && p.transponder) || '') === '7700';
+  var sprite = ICON_SPRITES[type] || ICON_SPRITES.narrow;
+  var maxDim = iconMaxDim(sel);
+  var key = 'png_' + (Math.round(hdg/2)*2) + '_' + (sel?1:0) + '_' + type + '_' + (emergency?1:0) + '_' + Math.round(maxDim);
+  if (IC[key]) return IC[key];
+  var scale = maxDim / Math.max(sprite.w, sprite.h);
+  var dispW = Math.max(10, Math.round(sprite.w * scale));
+  var dispH = Math.max(10, Math.round(sprite.h * scale));
+  var box = Math.max(dispW, dispH) + 6;
+  var sheet = emergency ? 'img/red.png' : (sel ? 'img/selected.png' : 'img/yellow.png');
+  var html = '<div style="width:' + box + 'px;height:' + box + 'px;position:relative;overflow:visible;">'
+    + '<span style="position:absolute;left:50%;top:50%;width:' + dispW + 'px;height:' + dispH + 'px;'
+    + 'background-image:url(' + sheet + ');background-repeat:no-repeat;'
+    + 'background-size:' + Math.round(SPRITE_W * scale) + 'px ' + Math.round(SPRITE_H * scale) + 'px;'
+    + 'background-position:-' + Math.round(sprite.x * scale) + 'px -' + Math.round(sprite.y * scale) + 'px;'
+    + 'transform:translate(-50%,-50%) rotate(' + hdg + 'deg);transform-origin:50% 50%;display:block;"></span></div>';
+  var icon = L.divIcon({
+    className: '',
+    html: html,
+    iconSize: [box, box],
+    iconAnchor: [box / 2, box / 2]
+  });
+  IC[key] = icon;
+  return icon;
+}
+
+var SPRITE_SHEET = 'img/aircrafts-sprite.png';
+var SPRITE_SHEET_W = 1896, SPRITE_SHEET_H = 1454;
+var ICON_SPRITES = {
+  wide:      {x:12,   y:410,  w:292, h:280},
+  narrow:    {x:340,  y:402,  w:268, h:290},
+  regional:  {x:588,  y:718,  w:236, h:250},
+  bizjet:    {x:1338, y:848,  w:180, h:204},
+  turboprop: {x:230,  y:1263, w:134, h:163},
+  fighter:   {x:800,  y:1263, w:124, h:165},
+  heli:      {x:434,  y:1284, w:98,  h:136},
+  glider:    {x:1740, y:1122, w:140, h:58},
+  drone:     {x:1320, y:1262, w:116, h:116}
+};
+function makePlaneIcon(hdg, sel, p) {
+  var type = iconTypeForPilot(p || {});
+  var emergency = String((p && p.transponder) || '') === '7700';
+  var sprite = ICON_SPRITES[type] || ICON_SPRITES.narrow;
+  var maxDim = iconMaxDim(sel);
+  var key = 'mask_' + (Math.round(hdg/2)*2) + '_' + (sel?1:0) + '_' + type + '_' + (emergency?1:0) + '_' + Math.round(maxDim);
+  if (IC[key]) return IC[key];
+  var scale = maxDim / Math.max(sprite.w, sprite.h);
+  var dispW = Math.max(10, Math.round(sprite.w * scale));
+  var dispH = Math.max(10, Math.round(sprite.h * scale));
+  var box = Math.max(dispW, dispH) + 8;
+  var filter = emergency
+    ? 'brightness(0) saturate(100%) invert(17%) sepia(91%) saturate(7467%) hue-rotate(359deg) brightness(103%) contrast(117%)'
+    : (sel
+      ? 'brightness(0) saturate(100%) invert(55%) sepia(88%) saturate(1823%) hue-rotate(356deg) brightness(103%) contrast(102%)'
+      : 'brightness(0) saturate(100%) invert(88%) sepia(74%) saturate(1454%) hue-rotate(338deg) brightness(103%) contrast(103%)');
+  var bgW = Math.round(SPRITE_SHEET_W * scale);
+  var bgH = Math.round(SPRITE_SHEET_H * scale);
+  var bgX = Math.round(sprite.x * scale);
+  var bgY = Math.round(sprite.y * scale);
+  var html = '<div style="width:' + box + 'px;height:' + box + 'px;position:relative;overflow:visible;">'
+    + '<span style="position:absolute;left:50%;top:50%;width:' + dispW + 'px;height:' + dispH + 'px;display:block;'
+    + 'background-image:url(' + SPRITE_SHEET + ');background-repeat:no-repeat;'
+    + 'background-size:' + bgW + 'px ' + bgH + 'px;'
+    + 'background-position:-' + bgX + 'px -' + bgY + 'px;'
+    + 'filter:' + filter + ';'
+    + 'transform:translate(-50%,-50%) rotate(' + hdg + 'deg);transform-origin:50% 50%;display:block;"></span></div>';
+  var icon = L.divIcon({
+    className: '',
+    html: html,
+    iconSize: [box, box],
+    iconAnchor: [box / 2, box / 2]
+  });
+  IC[key] = icon;
+  return icon;
+}
+
+// ─── TRAIL COLOR ──────────────────────────────────────────────────────────────
+// FR24 direction: OLDEST = dark blue/teal, NEWEST = yellow/warm
+// t=0 → oldest (dark navy-blue), t=1 → newest (yellow)
+var CSTOPS = [
+  [0.00, [10,  40, 100]],  // dark navy  — oldest
+  [0.20, [0,   90, 160]],  // deep blue
+  [0.42, [0,  170, 210]],  // cyan-blue
+  [0.65, [0,  210, 160]],  // cyan-green
+  [0.83, [57, 255,  20]],  // bright green
+  [1.00, [255,220,   0]]   // yellow     — newest
+];
+function trailCol(t) {
+  var lo = CSTOPS[0], hi = CSTOPS[CSTOPS.length-1];
+  for (var i = 0; i < CSTOPS.length-1; i++) {
+    if (t >= CSTOPS[i][0] && t <= CSTOPS[i+1][0]) { lo=CSTOPS[i]; hi=CSTOPS[i+1]; break; }
+  }
+  var f = (t - lo[0]) / (hi[0] - lo[0] || 1);
+  return 'rgb('
+    +Math.round(lo[1][0]+(hi[1][0]-lo[1][0])*f)+','
+    +Math.round(lo[1][1]+(hi[1][1]-lo[1][1])*f)+','
+    +Math.round(lo[1][2]+(hi[1][2]-lo[1][2])*f)+')';
+}
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+var gMap, gSat, gDark, gOsm;
+var gTrail;           // L.layerGroup for trail
+var gTrailRenderer;
+var gMarkers  = {};
+var gPilots   = new Map();
+var gTrailPts = {};   // callsign -> [[lat,lon], ...] sampled trail points
+var gReckoned = {};   // callsign -> {lat,lon}  — current dead-reckoned pos
+var gMotion   = {};   // callsign -> {from:[lat,lon], to:[lat,lon]}
+var gSamples  = {};   // callsign -> [{lat,lon,t}, ...] real fetched positions
+var gSelected = null;
+var gFetchInt = 5000;
+var gPlaybackDelay = 15000;
+var gFetchId  = null;
+var gAnimId   = null;
+var gLastFetch= 0;
+var gLastFrame= 0;
+var gNT       = null;
+var gFixIconCache = {};
+var gTrailHoverActive = false;
+var gHoveredTrailIndex = -1;
+var gHistoryLoaded = {};
+var gHistoryLoading = {};
+// Adaptive sampling state
+var gPrevHdg     = {};  // callsign -> heading at last sample
+var gPrevSampleT = {};  // callsign -> ms timestamp of last sample
+
+// ─── MAP ──────────────────────────────────────────────────────────────────────
+function initMap() {
+  gMap = L.map('map', {
+    center:[20,0],
+    zoom:3,
+    zoomControl:false,
+    preferCanvas:true,
+    zoomAnimation:true,
+    markerZoomAnimation:false,
+    zoomSnap:0.5,
+    zoomDelta:0.5,
+    wheelPxPerZoomLevel:120,
+    zoomAnimationThreshold:4,
+    fadeAnimation:false
+  });
+  gSat  = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles © Esri',maxZoom:19});
+  gDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OSM © CARTO',subdomains:'abcd',maxZoom:19});
+  gOsm  = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19});
+  gSat.addTo(gMap);
+  gTrailRenderer = L.canvas({padding:0.5});
+  gTrail = L.layerGroup().addTo(gMap);
+  gMap.on('click', function(){ if (gSelected) closePanel(); });
+  gMap.on('zoomend', refreshMarkerIcons);
+  load();
+  gFetchId = setInterval(load, gFetchInt);
+  animLoop();
+}
+
+function refreshMarkerIcons() {
+  Object.keys(gMarkers).forEach(function(cs) {
+    var mk = gMarkers[cs];
+    var p = gPilots.get(cs);
+    if (!mk || !p) return;
+    var sel = cs === gSelected;
+    var hb = Math.round((p.heading || 0) / 2) * 2;
+    mk._hb = hb;
+    mk._sel = sel;
+    mk.setIcon(makePlaneIcon(hb, sel, p));
+  });
+}
+
+function setLayer(t) {
+  [gSat,gDark,gOsm].forEach(function(l){ if(gMap.hasLayer(l)) gMap.removeLayer(l); });
+  document.querySelectorAll('.lb').forEach(function(b){ b.classList.remove('active'); });
+  if(t==='sat'){   gSat.addTo(gMap);  document.getElementById('btn-sat').classList.add('active'); }
+  else if(t==='dark'){ gDark.addTo(gMap); document.getElementById('btn-dark').classList.add('active'); }
+  else {           gOsm.addTo(gMap);  document.getElementById('btn-osm').classList.add('active'); }
+}
+
+// ─── LOAD DATA ────────────────────────────────────────────────────────────────
+function makeTrailFixIcon(color, angle, head, hover) {
+  var key = color + '_' + Math.round(angle) + '_' + (head ? 1 : 0) + '_' + (hover ? 1 : 0);
+  if (gFixIconCache[key]) return gFixIconCache[key];
+  var width = head ? 7 : 6;
+  var height = head ? 4 : 3;
+  var fill = hover || head ? '#ffffff' : color;
+  gFixIconCache[key] = L.divIcon({
+    className: 'trail-fix',
+    iconSize: [width, height],
+    iconAnchor: [width / 2, height / 2],
+    html: '<span style="width:' + width + 'px;height:' + height + 'px;background:' + fill + ';transform:rotate(' + angle + 'deg);transform-origin:50% 50%;"></span>'
+  });
+  return gFixIconCache[key];
+}
+
+async function load() {
+  document.getElementById('refresh-btn').disabled = true;
+  try {
+    var res    = await doFetch();
+    var data   = await res.json();
+    var pilots = data.pilots || [];
+
+    var newMap = new Map();
+    pilots.forEach(function(p){ newMap.set(p.callsign, p); });
+
+    // Remove departed
+    Object.keys(gMarkers).forEach(function(cs){
+      if (!newMap.has(cs)) {
+        gMap.removeLayer(gMarkers[cs]);
+        delete gMarkers[cs];
+        delete gTrailPts[cs];
+        delete gReckoned[cs];
+        delete gMotion[cs];
+        delete gSamples[cs];
+        delete gHistoryLoaded[cs];
+        delete gHistoryLoading[cs];
+        delete gPrevHdg[cs];
+        delete gPrevSampleT[cs];
+      }
+    });
+
+    // Update / create markers
+    newMap.forEach(function(p, cs){
+      if (!p.latitude && !p.longitude) return;
+      var nextReal = [p.latitude, p.longitude];
+      var sampleTime = Date.now();
+
+      // Push real fix into trail
+      if (!gTrailPts[cs]) gTrailPts[cs] = [];
+      var h = gTrailPts[cs], last = h[h.length-1];
+      if (!last || last[0] !== p.latitude || last[1] !== p.longitude) {
+        h.push([p.latitude, p.longitude]);
+        if (h.length > 600) h.shift();
+      }
+
+      if (!gSamples[cs]) gSamples[cs] = [];
+      var samples = gSamples[cs];
+      var lastSample = samples[samples.length - 1];
+      if (!lastSample || lastSample.lat !== p.latitude || lastSample.lon !== p.longitude) {
+        samples.push({lat: p.latitude, lon: p.longitude, t: sampleTime});
+        if (samples.length > HISTORY_LIMIT) samples.shift();
+      }
+
+      if (!gMarkers[cs]) {
+        var mk = L.marker([p.latitude, p.longitude], {icon: makePlaneIcon(p.heading||0, false, p), zIndexOffset:0});
+        mk._hb = -1; mk._sel = false;
+        mk.bindTooltip(function(){
+          var pp = gPilots.get(cs)||p, fp = pp.flight_plan;
+          return '<b>'+pp.callsign+'</b><br>'
+               + (fp?(fp.aircraft_short||fp.aircraft||'?'):'?')+'<br>'
+               + (fp?(fp.departure||'?')+' → '+(fp.arrival||'?'):'')+'<br>'
+               + 'FL'+('000'+Math.round((pp.altitude||0)/100)).slice(-3)
+               + ' &nbsp;'+(pp.groundspeed||0)+'kts';
+        }, {className:'pt', direction:'top', offset:[0,-4]});
+        mk.on('click', function(e){ L.DomEvent.stopPropagation(e); selectPilot(cs); });
+        mk.addTo(gMap);
+        gMarkers[cs] = mk;
+        gReckoned[cs] = {lat: nextReal[0], lon: nextReal[1]};
+      }
+    });
+
+    gPilots    = newMap;
+    gLastFetch = Date.now();
+
+    document.getElementById('sp').textContent          = pilots.length.toLocaleString();
+    document.getElementById('sa').textContent          = (data.controllers||[]).length.toLocaleString();
+    document.getElementById('last-update').textContent = new Date().toUTCString().slice(5,25)+' UTC';
+
+    if (gSelected) {
+      var sp = gPilots.get(gSelected);
+      if (sp) {
+        fillPanel(sp);
+        loadStoredHistory(gSelected);
+        redrawTrail();
+      }
+    }
+    document.getElementById('loading').style.display = 'none';
+    showNotif('✓ ' + pilots.length + ' aircraft loaded');
+  } catch(e) {
+    document.getElementById('loading').style.display = 'none';
+    showNotif('⚠ VATSIM unreachable — retrying in 5s');
+    console.error(e);
+  }
+  document.getElementById('refresh-btn').disabled = false;
+}
+
+// ─── ANIMATION LOOP ───────────────────────────────────────────────────────────
+// • 60fps dead-reckoning for all aircraft — always moving
+// • Adaptive trail sampling for selected aircraft:
+//     Straight (turn-rate < 1.5 °/s) → sample every 12s → sparse dashes
+//     Turning  (turn-rate ≥ 1.5 °/s) → sample every 2s  → dense curve
+// • Trail only redrawn when a new point is added (not every frame)
+function animLoop() {
+  function frame() {
+    var nowMs = Date.now();
+    var dtMs = gLastFrame ? (nowMs - gLastFrame) : 16;
+    gLastFrame = nowMs;
+
+    // --- Move all aircraft ---
+    gPilots.forEach(function(p, cs) {
+      var mk = gMarkers[cs];
+      if (!mk) return;
+      var pos = [p.latitude, p.longitude];
+      var displayedTrail = getDisplayedTrail(cs, nowMs);
+      if (displayedTrail.length) {
+        pos = displayedTrail[displayedTrail.length - 1];
+      }
+      gReckoned[cs] = {lat: pos[0], lon: pos[1]};
+      mk.setLatLng(pos);
+      // Update icon only on heading bucket or selection change
+      var sel = cs === gSelected;
+      var hb  = Math.round((p.heading||0) / 2) * 2;
+      if (mk._hb !== hb || mk._sel !== sel) {
+        mk._hb = hb; mk._sel = sel;
+        mk.setIcon(makePlaneIcon(hb, sel, p));
+        mk.setZIndexOffset(sel ? 1000 : 0);
+      }
+    });
+
+    // --- Selected aircraft live head update ---
+    if (gSelected) {
+      var p = gPilots.get(gSelected);
+      var r = gReckoned[gSelected];
+      if (p && r) {
+        var prevT = gPrevSampleT[gSelected] || 0;
+
+        // Turn rate °/s over last sample interval
+        if (!gTrailHoverActive && nowMs - prevT >= 250) {
+          gPrevSampleT[gSelected] = nowMs;
+          redrawTrail();
+        }
+        // Live lat/lon in panel
+        document.getElementById('p-lat').textContent = r.lat.toFixed(4);
+        document.getElementById('p-lon').textContent = r.lon.toFixed(4);
+      }
+    }
+
+    // Countdown bar
+    var pct = Math.min(1, (nowMs - gLastFetch) / gFetchInt);
+    document.getElementById('cbar').style.width = (100 - pct*100) + '%';
+
+    gAnimId = requestAnimationFrame(frame);
+  }
+  gAnimId = requestAnimationFrame(frame);
+}
+
+// ─── TRAIL DRAW ───────────────────────────────────────────────────────────────
+// Replicates FR24's trail exactly:
+// • A semi-transparent polyline connecting all points (the faint backbone)
+// • Square/rectangular dashes along that line, coloured by age
+//   oldest = dark navy-blue, newest = yellow
+// We achieve "square dashes" by drawing short thick polyline SEGMENTS
+// between consecutive points, alternating filled/gap using dashArray.
+// Each segment gets its own colour from the gradient.
+function redrawTrailLegacyUnused() {
+  gTrail.clearLayers();
+  if (!gSelected) return;
+  var pts = gTrailPts[gSelected];
+  if (!pts || pts.length < 2) return;
+  var n = pts.length;
+
+  for (var i = 0; i < n-1; i++) {
+    var t0  = i     / (n-1);  // age of this segment's start point (0=oldest,1=newest)
+    var t1  = (i+1) / (n-1);
+    var tc  = (t0 + t1) / 2;  // midpoint colour
+    var col = trailCol(tc);
+
+    // Segment drawn as a short dashed polyline:
+    // dashArray "5 3" = 5px dash, 3px gap  → rectangular dashes like FR24
+    L.polyline([pts[i], pts[i+1]], {
+      color:       col,
+      weight:      3,          // 3px wide — same as FR24 trail thickness
+      opacity:     0.85,
+      lineCap:     'square',   // square ends = rectangular dashes
+      lineJoin:    'miter',
+      dashArray:   '5 3',      // dash 5px, gap 3px
+      interactive: false,
+      smoothFactor: 0
+    }).addTo(gTrail);
+  }
+
+  // Endpoint dot at current position (the bright head of the trail)
+  var cur = pts[pts.length-1];
+  L.circleMarker(cur, {
+    radius:      5,
+    color:       '#fff',
+    weight:      1.5,
+    fillColor:   trailCol(1),
+    fillOpacity: 1,
+    interactive: false
+  }).addTo(gTrail);
+}
+
+// ─── SELECT / PANEL ───────────────────────────────────────────────────────────
+function redrawTrail() {
+  gTrail.clearLayers();
+  if (!gSelected) return;
+  var pts = getDisplayedTrail(gSelected, Date.now());
+  if (!pts || !pts.length) return;
+  var hoverRadius = hoverRadiusForZoom();
+  var linePts = buildLinePath(pts, gMap ? gMap.getZoom() : 10);
+  var ln = linePts.length;
+
+  for (var i = 0; i < ln - 1; i++) {
+    var t0 = i / (ln - 1);
+    var t1 = (i + 1) / (ln - 1);
+    var col = trailCol((t0 + t1) / 2);
+    L.polyline([linePts[i], linePts[i + 1]], {
+      color: col,
+      weight: 3,
+      opacity: 0.46,
+      lineCap: 'butt',
+      lineJoin: 'round',
+      interactive: false,
+      smoothFactor: 0,
+      renderer: gTrailRenderer
+    }).addTo(gTrail);
+  }
+
+  for (var j = 0; j < ln; j++) {
+    var t = j / (ln - 1);
+    var fixColor = trailCol(t);
+    var fix = L.circleMarker(linePts[j], {
+      radius: 1.5,
+      stroke: false,
+      fillColor: gHoveredTrailIndex === j ? '#ffffff' : fixColor,
+      fillOpacity: gHoveredTrailIndex === j ? 1 : 0.82,
+      interactive: false,
+      renderer: gTrailRenderer
+    }).addTo(gTrail);
+    var hoverTarget = L.circleMarker(linePts[j], {
+      radius: hoverRadius,
+      stroke: false,
+      fillOpacity: 0,
+      interactive: true,
+      bubblingMouseEvents: false,
+      className: 'trail-hover-target',
+      renderer: gTrailRenderer
+    }).addTo(gTrail);
+    (function(marker, target, color, idx){
+      target.on('mouseover', function() {
+        gTrailHoverActive = true;
+        gHoveredTrailIndex = idx;
+        gMap.getContainer().style.setProperty('cursor', 'pointer', 'important');
+        marker.setStyle({ fillColor: '#ffffff' });
+      });
+      target.on('mousemove', function() {
+        gTrailHoverActive = true;
+        gHoveredTrailIndex = idx;
+        gMap.getContainer().style.setProperty('cursor', 'pointer', 'important');
+      });
+      target.on('mouseout', function() {
+        gTrailHoverActive = false;
+        if (gHoveredTrailIndex === idx) gHoveredTrailIndex = -1;
+        gMap.getContainer().style.removeProperty('cursor');
+        marker.setStyle({ fillColor: color });
+      });
+    })(fix, hoverTarget, fixColor, j);
+  }
+}
+
+function selectPilot(cs) {
+  if (gSelected && gMarkers[gSelected]) {
+    var op = gPilots.get(gSelected);
+    if (op) { gMarkers[gSelected].setIcon(makePlaneIcon(Math.round((op.heading||0)/2)*2, false, op)); gMarkers[gSelected]._sel = false; }
+  }
+  gSelected = cs;
+  var p = gPilots.get(cs); if (!p) return;
+  var r = gReckoned[cs];
+  gPrevSampleT[cs] = 0;
+  gMarkers[cs].setIcon(makePlaneIcon(Math.round((p.heading||0)/2)*2, true, p));
+  gMarkers[cs]._sel = true;
+  fillPanel(p);
+  document.getElementById('panel').classList.add('open');
+  loadStoredHistory(cs);
+  redrawTrail();
+  gMap.panTo(r ? [r.lat, r.lon] : [p.latitude, p.longitude], {animate:true, duration:.4});
+}
+
+function fillPanel(p) {
+  var fp = p.flight_plan;
+  document.getElementById('p-cs').textContent  = p.callsign;
+  document.getElementById('p-ac').textContent  = (fp&&(fp.aircraft_short||fp.aircraft))||'Unknown Aircraft';
+  document.getElementById('p-dep').textContent = (fp&&fp.departure)||'—';
+  document.getElementById('p-arr').textContent = (fp&&fp.arrival)||'—';
+  var fl = Math.round((p.altitude||0)/100);
+  document.getElementById('p-alt').textContent = fl > 0 ? 'FL'+('000'+fl).slice(-3) : ((p.altitude||0)+' ft');
+  document.getElementById('p-spd').innerHTML   = (p.groundspeed||0)+'<span class="su">kts</span>';
+  document.getElementById('p-hdg').innerHTML   = (p.heading||0)+'<span class="su">°</span>';
+  document.getElementById('p-sqk').textContent = p.transponder||'—';
+  document.getElementById('p-lat').textContent = p.latitude  ? p.latitude.toFixed(4)  : '—';
+  document.getElementById('p-lon').textContent = p.longitude ? p.longitude.toFixed(4) : '—';
+  document.getElementById('p-rt').textContent  = (fp&&fp.route)||'No route filed';
+}
+
+function closePanel() {
+  if (gSelected && gMarkers[gSelected]) {
+    var p = gPilots.get(gSelected);
+    if (p) { gMarkers[gSelected].setIcon(makePlaneIcon(Math.round((p.heading||0)/2)*2,false, p)); gMarkers[gSelected]._sel=false; }
+  }
+  gSelected = null;
+  gTrailHoverActive = false;
+  gHoveredTrailIndex = -1;
+  document.getElementById('panel').classList.remove('open');
+  gTrail.clearLayers();
+}
+
+// ─── SEARCH ───────────────────────────────────────────────────────────────────
+function doSearch() {
+  var q = document.getElementById('si').value.trim().toUpperCase(); if (!q) return;
+  var hit = gPilots.get(q);
+  if (!hit) gPilots.forEach(function(p,cs){ if(!hit && cs.indexOf(q)!==-1) hit=p; });
+  if (hit) { gMap.setView([hit.latitude, hit.longitude], 9, {animate:true}); selectPilot(hit.callsign); }
+  else showNotif('⚠ Not found: '+q);
+}
+document.getElementById('si').addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
+
+function showNotif(m) {
+  var el = document.getElementById('notif');
+  el.textContent = m; el.classList.add('show');
+  clearTimeout(gNT);
+  gNT = setTimeout(function(){ el.classList.remove('show'); }, 3500);
+}
+function doRefresh() {
+  clearInterval(gFetchId);
+  load();
+  gFetchId = setInterval(load, gFetchInt);
+}
+
+initMap();
+</script>
+</body>
+</html>
