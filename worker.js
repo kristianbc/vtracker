@@ -46,28 +46,16 @@ function normalizePilotRows(pilots, observedAt) {
 
 async function persistLatestPositions(db, rows) {
   if (!db || !rows.length) return;
-  const chunkSize = 30;
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
-
-    const latestPlaceholders = [];
-    const latestBindings = [];
-    for (const row of chunk) {
-      latestPlaceholders.push("(?, ?, ?, ?)");
-      latestBindings.push(row.callsign, row.observedAt, row.lat, row.lon);
-    }
-
-    await db
-      .prepare(
-        `INSERT INTO latest_positions (callsign, observed_at, lat, lon)
-         VALUES ${latestPlaceholders.join(", ")}
-         ON CONFLICT(callsign) DO UPDATE SET
-           observed_at = excluded.observed_at,
-           lat = excluded.lat,
-           lon = excluded.lon`
-      )
-      .bind(...latestBindings)
-      .run();
+  const stmt = db.prepare(
+    `INSERT INTO latest_positions (callsign, observed_at, lat, lon)
+     VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT(callsign) DO UPDATE SET
+       observed_at = excluded.observed_at,
+       lat = excluded.lat,
+       lon = excluded.lon`
+  );
+  for (const row of rows) {
+    await stmt.bind(row.callsign, row.observedAt, row.lat, row.lon).run();
   }
 }
 
