@@ -15,6 +15,15 @@ function json(data, init = {}) {
   return new Response(JSON.stringify(data), { ...init, headers });
 }
 
+let lastPersistStatus = { phase: null, message: null, timestamp: 0 };
+function recordPersistError(phase, error) {
+  lastPersistStatus = {
+    phase,
+    message: error ? String(error) : null,
+    timestamp: Date.now(),
+  };
+}
+
 function normalizePilotRows(pilots, observedAt) {
   const rows = [];
   for (const pilot of pilots) {
@@ -121,11 +130,13 @@ async function handleVatsim(env, ctx) {
     try {
       await persistLatestPositions(env.DB, rows);
     } catch (error) {
+      recordPersistError("latest_positions", error);
       console.error("persistLatestPositions failed", error);
     }
 
     ctx.waitUntil(
       persistTrajectoryPoints(env.DB, rows).catch((error) => {
+        recordPersistError("trajectory_points", error);
         console.error("persistTrajectoryPoints failed", error);
       })
     );
@@ -172,6 +183,15 @@ async function handleHistory(request, env) {
   });
 }
 
+function handleHealth() {
+  return json({
+    ok: true,
+    service: "vtracker-worker",
+    now: Date.now(),
+    persist: lastPersistStatus,
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
@@ -181,7 +201,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/health") {
-      return json({ ok: true, service: "vtracker-worker", now: Date.now() });
+      return handleHealth();
     }
 
     if (url.pathname === "/api/vatsim") {
