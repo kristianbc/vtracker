@@ -73,7 +73,7 @@ async function persistLatestPositions(db, rows) {
 
 async function persistTrajectoryPoints(db, rows) {
   if (!db || !rows.length) return;
-  const chunkSize = 32;
+  const chunkSize = 16;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
 
