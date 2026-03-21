@@ -136,6 +136,8 @@ body{background:var(--bg);font-family:'Barlow Condensed',sans-serif;color:var(--
 var VURL = 'https://data.vatsim.net/v3/vatsim-data.json';
 var API_BASE = (window.VTRACKER_API_BASE || '').replace(/\/+$/, '');
 var HISTORY_LIMIT = 4000;
+var HISTORY_BATCH_LIMIT = 300;
+var HISTORY_BATCH_SIZE = 80;
 var PROXIES = [
   function(u){ return 'https://api.allorigins.win/raw?url='+encodeURIComponent(u); },
   function(u){ return 'https://corsproxy.io/?url='+encodeURIComponent(u); },
@@ -337,6 +339,37 @@ async function loadStoredHistory(cs) {
     console.warn('history load failed', e);
   } finally {
     delete gHistoryLoading[cs];
+  }
+}
+async function loadStoredHistoryBatch(callsigns) {
+  if (!(API_BASE || location.protocol !== 'file:')) return;
+  var pending = (callsigns || []).filter(function(cs) {
+    return cs && !gHistoryLoaded[cs] && !gHistoryLoading[cs];
+  });
+  if (!pending.length) return;
+
+  for (var i = 0; i < pending.length; i += HISTORY_BATCH_SIZE) {
+    var chunk = pending.slice(i, i + HISTORY_BATCH_SIZE);
+    chunk.forEach(function(cs){ gHistoryLoading[cs] = true; });
+    try {
+      var r = await fetch(apiUrl('/api/history-batch'), {
+        method: 'POST',
+        cache: 'no-store',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({callsigns: chunk, limit: HISTORY_BATCH_LIMIT})
+      });
+      if (!r.ok) continue;
+      var data = await r.json();
+      chunk.forEach(function(cs) {
+        mergeStoredSamples(cs, (data.pointsByCallsign && data.pointsByCallsign[cs]) || []);
+        gHistoryLoaded[cs] = true;
+        delete gHistoryLoading[cs];
+      });
+      if (gSelected && chunk.indexOf(gSelected) !== -1) redrawTrail();
+    } catch (e) {
+      console.warn('history batch load failed', e);
+      chunk.forEach(function(cs){ delete gHistoryLoading[cs]; });
+    }
   }
 }
 
@@ -736,6 +769,7 @@ async function load() {
 
     gPilots    = newMap;
     gLastFetch = Date.now();
+    loadStoredHistoryBatch(Array.from(newMap.keys()));
 
     document.getElementById('sp').textContent          = pilots.length.toLocaleString();
     document.getElementById('sa').textContent          = (data.controllers||[]).length.toLocaleString();
