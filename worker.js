@@ -83,71 +83,27 @@ async function handleHistory(request, env) {
   const url = new URL(request.url);
   const callsign = String(url.searchParams.get("callsign") || "").trim().toUpperCase();
   const limit = Math.max(50, Math.min(5000, Number(url.searchParams.get("limit") || 2000)));
+  const before = Number(url.searchParams.get("before") || 0);
 
   if (!callsign) return json({ error: "callsign_required" }, { status: 400 });
 
-  const result = await env.DB
-    .prepare(
-      "SELECT observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code FROM aircraft_points WHERE callsign = ?1 ORDER BY observed_at DESC LIMIT ?2"
-    )
-    .bind(callsign, limit)
-    .all();
+  const result = before > 0
+    ? await env.DB
+        .prepare(
+          "SELECT observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code FROM aircraft_points WHERE callsign = ?1 AND observed_at < ?2 ORDER BY observed_at DESC LIMIT ?3"
+        )
+        .bind(callsign, before, limit)
+        .all()
+    : await env.DB
+        .prepare(
+          "SELECT observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code FROM aircraft_points WHERE callsign = ?1 ORDER BY observed_at DESC LIMIT ?2"
+        )
+        .bind(callsign, limit)
+        .all();
 
   return json({
     callsign,
     points: (result.results || []).slice().reverse(),
-  }, {
-    headers: {
-      "Cache-Control": "no-store, no-cache, must-revalidate",
-    },
-  });
-}
-async function handleHistoryBatch(request, env) {
-  if (!env.DB) return json({ error: "database_not_bound" }, { status: 503 });
-  if (request.method !== "POST") return json({ error: "method_not_allowed" }, { status: 405 });
-
-  let body;
-  try {
-    body = await request.json();
-  } catch (error) {
-    return json({ error: "invalid_json" }, { status: 400 });
-  }
-
-  const limit = Math.max(20, Math.min(1000, Number((body && body.limit) || 300)));
-  const callsigns = Array.from(new Set(((body && body.callsigns) || [])
-    .map((cs) => String(cs || "").trim().toUpperCase())
-    .filter(Boolean)))
-    .slice(0, 100);
-
-  if (!callsigns.length) {
-    return json({ pointsByCallsign: {} });
-  }
-
-  const placeholders = callsigns.map((_, i) => `?${i + 1}`).join(", ");
-  const bindings = callsigns.slice();
-  bindings.push(limit);
-
-  const sql =
-    `SELECT callsign, observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code
-     FROM (
-       SELECT callsign, observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code,
-              ROW_NUMBER() OVER (PARTITION BY callsign ORDER BY observed_at DESC) AS rn
-       FROM aircraft_points
-       WHERE callsign IN (${placeholders})
-     )
-     WHERE rn <= ?${callsigns.length + 1}
-     ORDER BY callsign, observed_at ASC`;
-
-  const result = await env.DB.prepare(sql).bind(...bindings).all();
-  const pointsByCallsign = {};
-  for (const cs of callsigns) pointsByCallsign[cs] = [];
-  for (const row of result.results || []) {
-    if (!pointsByCallsign[row.callsign]) pointsByCallsign[row.callsign] = [];
-    pointsByCallsign[row.callsign].push(row);
-  }
-
-  return json({
-    pointsByCallsign,
   }, {
     headers: {
       "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -173,10 +129,6 @@ export default {
 
     if (url.pathname === "/api/history") {
       return handleHistory(request, env);
-    }
-
-    if (url.pathname === "/api/history-batch") {
-      return handleHistoryBatch(request, env);
     }
 
     return env.ASSETS.fetch(request);
