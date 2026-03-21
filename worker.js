@@ -34,7 +34,7 @@ async function persistSnapshot(db, pilots, observedAt) {
     });
   }
 
-  const chunkSize = 150;
+  const chunkSize = 100;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
 
