@@ -34,7 +34,7 @@ async function persistSnapshot(db, pilots, observedAt) {
     });
   }
 
-  const chunkSize = 100;
+  const chunkSize = 50;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
 
@@ -106,11 +106,11 @@ async function handleVatsim(env, ctx) {
   const observedAt = Date.parse((data.general && data.general.update_timestamp) || "") || Date.now();
 
   if (env.DB) {
-    try {
-      await persistSnapshot(env.DB, pilots, observedAt);
-    } catch (error) {
-      return json({ error: "persist_failed", detail: String(error) }, { status: 502 });
-    }
+    ctx.waitUntil(
+      persistSnapshot(env.DB, pilots, observedAt).catch((error) => {
+        console.error("persistSnapshot failed", error);
+      })
+    );
   }
 
   return json(data, {
