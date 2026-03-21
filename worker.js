@@ -22,13 +22,6 @@ async function persistSnapshot(db, pilots, observedAt) {
     const callsign = String(pilot.callsign || "").trim().toUpperCase();
     if (!callsign || typeof pilot.latitude !== "number" || typeof pilot.longitude !== "number") continue;
 
-    const latest = await db
-      .prepare("SELECT lat, lon FROM latest_positions WHERE callsign = ?1")
-      .bind(callsign)
-      .first();
-
-    if (latest && latest.lat === pilot.latitude && latest.lon === pilot.longitude) continue;
-
     await db.batch([
       db
         .prepare(
