@@ -15,8 +15,7 @@ function json(data, init = {}) {
   return new Response(JSON.stringify(data), { ...init, headers });
 }
 
-async function persistSnapshot(db, pilots, observedAt) {
-  if (!db || !pilots.length) return;
+function normalizePilotRows(pilots, observedAt) {
   const rows = [];
   for (const pilot of pilots) {
     const callsign = String(pilot.callsign || "").trim().toUpperCase();
@@ -33,7 +32,38 @@ async function persistSnapshot(db, pilots, observedAt) {
       aircraftCode: (pilot.flight_plan && (pilot.flight_plan.aircraft_short || pilot.flight_plan.aircraft)) || null,
     });
   }
+  return rows;
+}
 
+async function persistLatestPositions(db, rows) {
+  if (!db || !rows.length) return;
+  const chunkSize = 200;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+
+    const latestPlaceholders = [];
+    const latestBindings = [];
+    for (const row of chunk) {
+      latestPlaceholders.push("(?, ?, ?, ?)");
+      latestBindings.push(row.callsign, row.observedAt, row.lat, row.lon);
+    }
+
+    await db
+      .prepare(
+        `INSERT INTO latest_positions (callsign, observed_at, lat, lon)
+         VALUES ${latestPlaceholders.join(", ")}
+         ON CONFLICT(callsign) DO UPDATE SET
+           observed_at = excluded.observed_at,
+           lat = excluded.lat,
+           lon = excluded.lon`
+      )
+      .bind(...latestBindings)
+      .run();
+  }
+}
+
+async function persistTrajectoryPoints(db, rows) {
+  if (!db || !rows.length) return;
   const chunkSize = 50;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
@@ -62,25 +92,6 @@ async function persistSnapshot(db, pilots, observedAt) {
       )
       .bind(...pointBindings)
       .run();
-
-    const latestPlaceholders = [];
-    const latestBindings = [];
-    for (const row of chunk) {
-      latestPlaceholders.push("(?, ?, ?, ?)");
-      latestBindings.push(row.callsign, row.observedAt, row.lat, row.lon);
-    }
-
-    await db
-      .prepare(
-        `INSERT INTO latest_positions (callsign, observed_at, lat, lon)
-         VALUES ${latestPlaceholders.join(", ")}
-         ON CONFLICT(callsign) DO UPDATE SET
-           observed_at = excluded.observed_at,
-           lat = excluded.lat,
-           lon = excluded.lon`
-      )
-      .bind(...latestBindings)
-      .run();
   }
 }
 
@@ -104,11 +115,18 @@ async function handleVatsim(env, ctx) {
   const data = await upstream.json();
   const pilots = Array.isArray(data.pilots) ? data.pilots : [];
   const observedAt = Date.parse((data.general && data.general.update_timestamp) || "") || Date.now();
+  const rows = normalizePilotRows(pilots, observedAt);
 
   if (env.DB) {
+    try {
+      await persistLatestPositions(env.DB, rows);
+    } catch (error) {
+      console.error("persistLatestPositions failed", error);
+    }
+
     ctx.waitUntil(
-      persistSnapshot(env.DB, pilots, observedAt).catch((error) => {
-        console.error("persistSnapshot failed", error);
+      persistTrajectoryPoints(env.DB, rows).catch((error) => {
+        console.error("persistTrajectoryPoints failed", error);
       })
     );
   }
