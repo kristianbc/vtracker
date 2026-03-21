@@ -1,29 +1,25 @@
 # Cloudflare Deploy
 
-This project is prepared for Cloudflare Pages + Pages Functions + D1.
+This project is prepared for Cloudflare Workers static assets + D1.
 
 ## What gets deployed
 
 - Static frontend: `vatsim-tracker.html`, `index.html`, `img/`
-- API routes:
+- Worker API routes:
   - `/api/vatsim`
   - `/api/history?callsign=...`
   - `/api/health`
 - D1 schema: `schema.sql`
+- Worker entry: `worker.js`
 
 ## One-time setup
 
 1. Push this folder to GitHub.
-2. In Cloudflare, create a new Pages project from that repo.
-3. Set:
-   - Build command: none
-   - Build output directory: `.`
-4. Create a D1 database named `vtracker-db`.
-5. In your Pages project, add a D1 binding:
-   - Variable name: `DB`
-   - Database: `vtracker-db`
-6. Run `schema.sql` against that D1 database.
-7. Redeploy the Pages project.
+2. In Cloudflare, create a Worker from this repo or deploy it with `wrangler deploy`.
+3. Create a D1 database named `vtracker-db`.
+4. Bind the D1 database as `DB`.
+5. Run `schema.sql` against that D1 database.
+6. Deploy.
 
 ## What changes in the app
 
