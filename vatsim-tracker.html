@@ -632,6 +632,8 @@ var gTrailHoverActive = false;
 var gHoveredTrailIndex = -1;
 var gHistoryLoaded = {};
 var gHistoryLoading = {};
+var gMissingFetches = {};
+var gMissingFetchLimit = 6;
 // Adaptive sampling state
 var gPrevHdg     = {};  // callsign -> heading at last sample
 var gPrevSampleT = {};  // callsign -> ms timestamp of last sample
@@ -709,11 +711,16 @@ async function load() {
     var pilots = data.pilots || [];
 
     var newMap = new Map();
-    pilots.forEach(function(p){ newMap.set(p.callsign, p); });
+    pilots.forEach(function(p){
+      newMap.set(p.callsign, p);
+      gMissingFetches[p.callsign] = 0;
+    });
 
     // Remove departed
     Object.keys(gMarkers).forEach(function(cs){
       if (!newMap.has(cs)) {
+        gMissingFetches[cs] = (gMissingFetches[cs] || 0) + 1;
+        if (gMissingFetches[cs] < gMissingFetchLimit) return;
         gMap.removeLayer(gMarkers[cs]);
         delete gMarkers[cs];
         delete gTrailPts[cs];
@@ -722,8 +729,10 @@ async function load() {
         delete gSamples[cs];
         delete gHistoryLoaded[cs];
         delete gHistoryLoading[cs];
+        delete gMissingFetches[cs];
         delete gPrevHdg[cs];
         delete gPrevSampleT[cs];
+        if (gSelected === cs) closePanel();
       }
     });
 
