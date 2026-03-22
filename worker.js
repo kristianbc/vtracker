@@ -16,12 +16,27 @@ function json(data, init = {}) {
 }
 
 let lastPersistStatus = { phase: null, message: null, timestamp: 0 };
+let lastCleanupAt = 0;
 function recordPersistError(phase, error) {
   lastPersistStatus = {
     phase,
     message: error ? String(error) : null,
     timestamp: Date.now(),
   };
+}
+
+async function cleanupStaleData(db, nowMs) {
+  if (!db) return;
+  if (lastCleanupAt && nowMs - lastCleanupAt < 60 * 60 * 1000) return;
+  lastCleanupAt = nowMs;
+
+  const staleLatestThreshold = nowMs - 6 * 60 * 60 * 1000;
+  const staleHistoryThreshold = nowMs - 48 * 60 * 60 * 1000;
+
+  await db.batch([
+    db.prepare("DELETE FROM latest_positions WHERE observed_at < ?1").bind(staleLatestThreshold),
+    db.prepare("DELETE FROM aircraft_points WHERE observed_at < ?1").bind(staleHistoryThreshold),
+  ]);
 }
 
 function normalizePilotRows(pilots, observedAt) {
@@ -123,10 +138,16 @@ async function handleVatsim(env, ctx) {
     }
 
     ctx.waitUntil(
-      persistTrajectoryPoints(env.DB, rows).catch((error) => {
-        recordPersistError("trajectory_points", error);
-        console.error("persistTrajectoryPoints failed", error);
-      })
+      Promise.all([
+        persistTrajectoryPoints(env.DB, rows).catch((error) => {
+          recordPersistError("trajectory_points", error);
+          console.error("persistTrajectoryPoints failed", error);
+        }),
+        cleanupStaleData(env.DB, observedAt).catch((error) => {
+          recordPersistError("cleanup", error);
+          console.error("cleanupStaleData failed", error);
+        }),
+      ])
     );
   }
 

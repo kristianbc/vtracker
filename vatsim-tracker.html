@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VATSIM Radar</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -136,8 +137,9 @@ body{background:var(--bg);font-family:'Barlow Condensed',sans-serif;color:var(--
 var VURL = 'https://data.vatsim.net/v3/vatsim-data.json';
 var API_BASE = (window.VTRACKER_API_BASE || '').replace(/\/+$/, '');
 var HISTORY_LIMIT = 4000;
-var HISTORY_BATCH_LIMIT = 2000;
-var HISTORY_BATCH_SIZE = 40;
+var HISTORY_BATCH_LIMIT = 250;
+var HISTORY_BATCH_SIZE = 12;
+var HISTORY_CONCURRENCY = 3;
 var PROXIES = [
   function(u){ return 'https://api.allorigins.win/raw?url='+encodeURIComponent(u); },
   function(u){ return 'https://corsproxy.io/?url='+encodeURIComponent(u); },
@@ -374,19 +376,35 @@ async function backfillHistoryForCallsign(cs) {
     console.warn('history backfill failed', e);
   } finally {
     delete gHistoryLoading[cs];
+    gActiveHistoryLoads = Math.max(0, gActiveHistoryLoads - 1);
+    pumpHistoryQueue();
+  }
+}
+function queueHistoryLoad(cs) {
+  if (!cs || gHistoryLoaded[cs] || gHistoryLoading[cs] || gHistoryQueued[cs]) return;
+  gHistoryQueued[cs] = true;
+  gHistoryQueue.push(cs);
+}
+function pumpHistoryQueue() {
+  while (gActiveHistoryLoads < HISTORY_CONCURRENCY && gHistoryQueue.length) {
+    var cs = gHistoryQueue.shift();
+    delete gHistoryQueued[cs];
+    if (!cs || gHistoryLoaded[cs] || gHistoryLoading[cs]) continue;
+    gActiveHistoryLoads++;
+    backfillHistoryForCallsign(cs);
   }
 }
 async function loadStoredHistoryBatch(callsigns) {
   if (!(API_BASE || location.protocol !== 'file:')) return;
   var pending = (callsigns || []).filter(function(cs) {
-    return cs && !gHistoryLoaded[cs] && !gHistoryLoading[cs];
+    return cs && !gHistoryLoaded[cs] && !gHistoryLoading[cs] && !gHistoryQueued[cs];
   });
   if (!pending.length) return;
 
-  for (var i = 0; i < pending.length; i += HISTORY_BATCH_SIZE) {
-    var chunk = pending.slice(i, i + HISTORY_BATCH_SIZE);
-    chunk.forEach(function(cs){ backfillHistoryForCallsign(cs); });
-  }
+  pending.slice(0, HISTORY_BATCH_SIZE).forEach(function(cs) {
+    queueHistoryLoad(cs);
+  });
+  pumpHistoryQueue();
 }
 
 // ─── PLANE ICON — Canvas-drawn FR24 silhouette ────────────────────────────────
@@ -649,6 +667,9 @@ var gHoveredTrailIndex = -1;
 var gHistoryLoaded = {};
 var gHistoryLoading = {};
 var gHistoryCursor = {};
+var gHistoryQueue = [];
+var gHistoryQueued = {};
+var gActiveHistoryLoads = 0;
 var gMissingFetches = {};
 var gMissingFetchLimit = 6;
 // Adaptive sampling state
