@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Radar icon -->
+  <g transform="translate(100,100)">
+    <!-- outer ring -->
+    <circle r="80" stroke="#ffffff" stroke-width="6" fill="none" opacity="0.9"></circle>
+    
+    <!-- inner rings -->
+    <circle r="55" stroke="#ffffff" stroke-width="4" fill="none" opacity="0.6"></circle>
+    <circle r="30" stroke="#ffffff" stroke-width="3" fill="none" opacity="0.5"></circle>
+
+    <!-- radar sweep -->
+    <path d="M0 0 L0 -80 A80 80 0 0 1 70 40 Z" fill="#ffffff" opacity="0.15"></path>
+
+    <!-- center dot -->
+    <circle r="6" fill="#ffffff"></circle>
+  </g>
+</svg>

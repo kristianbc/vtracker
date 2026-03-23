@@ -3,29 +3,51 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VATSIM Radar</title>
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap" rel="stylesheet">
+<title>FlightSimRadar24: Live Vatsim Tracker - RealTime Vatsim Tracker Map</title>
+<link rel="icon" href="img/logo_fav.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <style>
-:root{--bg:#0a0e17;--panel:#0d1320;--border:#1e2d45;--accent:#00d4ff;--accent2:#ff6b35;--green:#39ff14;--text:#c8d8e8;--muted:#4a6080}
+:root{--bg:#0a0e17;--panel:#0d1320;--border:#1e2d45;--accent:#00d4ff;--accent2:#ff6b35;--green:#39ff14;--text:#c8d8e8;--muted:#4a6080;
+  --fr-bg:#1a1a1a;--fr-border:#2e2e2e;--fr-text:#e0e0e0;--fr-muted:#888;--fr-hover:#2a2a2a}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);font-family:'Barlow Condensed',sans-serif;color:var(--text);overflow:hidden;height:100vh;width:100vw}
-#map{width:100%;height:100%;background:#000}
-#topbar{position:absolute;top:0;left:0;right:0;height:50px;background:rgba(10,14,23,.95);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:18px;padding:0 18px;z-index:1000;backdrop-filter:blur(8px)}
-.logo{font-family:'Share Tech Mono',monospace;font-size:17px;color:var(--accent);letter-spacing:3px;display:flex;align-items:center;gap:8px;white-space:nowrap}
-.logo-dot{width:7px;height:7px;background:var(--green);border-radius:50%;box-shadow:0 0 6px var(--green);animation:pulse 1.5s infinite}
-@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.6)}}
-.pill{display:flex;align-items:center;gap:5px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:3px;padding:3px 10px;font-size:11px;letter-spacing:1px;white-space:nowrap}
-.pill .lbl{color:var(--muted);text-transform:uppercase}
-.pill .val{color:var(--accent);font-family:'Share Tech Mono',monospace}
-#last-update{margin-left:auto;font-size:10px;color:var(--muted);font-family:'Share Tech Mono',monospace;white-space:nowrap}
-#refresh-btn{background:transparent;border:1px solid var(--accent);color:var(--accent);padding:4px 12px;border-radius:3px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:1px;text-transform:uppercase;transition:all .2s;white-space:nowrap}
-#refresh-btn:hover{background:var(--accent);color:var(--bg)}
-#refresh-btn:disabled{opacity:.35;cursor:wait}
-#cbar{position:absolute;top:50px;left:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--green));z-index:999;transition:width 1s linear;pointer-events:none}
-#panel{position:absolute;top:50px;right:0;width:310px;height:calc(100vh - 50px);background:rgba(10,14,23,.97);border-left:1px solid var(--border);backdrop-filter:blur(16px);z-index:900;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1)}
+#map{width:100%;height:100%}
+.maplibregl-ctrl-bottom-left,.maplibregl-ctrl-bottom-right,.maplibregl-ctrl-top-left,.maplibregl-ctrl-top-right{display:none}
+
+/* ─── TOP FADE OVERLAY ─────────────────────────────────────────────────────── */
+#top-fade{position:absolute;top:-36px;left:0;right:0;height:160px;background:linear-gradient(to bottom,#1a1a1a 0%,rgba(26,26,26,0.95) 30%,rgba(26,26,26,0.65) 60%,rgba(26,26,26,0.2) 85%,transparent 100%);z-index:99;pointer-events:none}
+
+/* ─── NAVBAR — transparent, 3-column layout ─────────────────────────────── */
+#topbar{position:absolute;top:0;left:0;right:0;height:72px;background:transparent;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 24px;z-index:1000;gap:0}
+#nav-left{display:flex;align-items:center}
+#nav-logo{display:flex;align-items:center;justify-content:center;text-decoration:none}
+#nav-logo img{height:68px;width:auto;filter:drop-shadow(0 2px 14px rgba(0,0,0,.85))}
+#nav-right{display:flex;align-items:center;justify-content:flex-end;gap:10px}
+#nav-utc{font-family:'Open Sans',sans-serif;font-weight:400;color:#fff;white-space:nowrap;text-shadow:0 1px 5px rgba(0,0,0,.9);flex-shrink:0;margin-right:19px;display:flex;align-items:baseline;gap:4px}
+#nav-utc .utc-time{font-size:17px;letter-spacing:.5px}
+#nav-utc .utc-label{font-size:12px;letter-spacing:1.5px;opacity:1}
+#nav-search-wrap{position:relative;width:281px}
+#nav-search-wrap .search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#999;pointer-events:none;flex-shrink:0}
+#nav-search-wrap .search-kbd{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:#fff;border:1px solid #ccc;border-radius:4px;width:17px;height:17px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#888;font-family:'Open Sans',sans-serif;pointer-events:none;line-height:1;padding:0}
+#si{width:100%;background:#fff;border:none;color:#222;padding:8px 34px 8px 36px;font-family:'Open Sans',sans-serif;font-size:14px;outline:none;border-radius:8px;box-shadow:0 1px 8px rgba(0,0,0,.35);transition:box-shadow .15s}
+#si::placeholder{color:#aaa;font-size:14px}
+#si:focus{box-shadow:0 2px 16px rgba(0,0,0,.45)}
+#search-dropdown{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #e0e0e0;border-radius:4px;z-index:2000;box-shadow:0 8px 28px rgba(0,0,0,.2);overflow:hidden}
+#search-dropdown.open{display:block}
+.sdrop-section-title{display:flex;justify-content:space-between;align-items:center;padding:10px 14px 4px;font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#aaa;font-family:'Open Sans',sans-serif}
+.sdrop-section-title a{color:#e8a030;font-size:11px;text-transform:none;letter-spacing:0;cursor:pointer;text-decoration:none;font-family:'Open Sans',sans-serif}
+.sdrop-section-title a:hover{text-decoration:underline}
+.sdrop-item{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;transition:background .1s;font-size:13px;color:#333;font-family:'Open Sans',sans-serif}
+.sdrop-item:hover{background:#f5f5f5}
+.sdrop-item svg{color:#bbb;flex-shrink:0}
+#nav-menu-btn{display:flex;align-items:center;justify-content:center;width:34px;height:34px;cursor:pointer;color:rgba(255,255,255,.7);transition:color .2s;flex-shrink:0;filter:drop-shadow(0 1px 3px rgba(0,0,0,.6))}
+#nav-menu-btn:hover{color:#fff}
+#nav-menu-btn svg{width:20px;height:20px}
+
+/* ─── SIDE PANEL ───────────────────────────────────────────────────────────── */
+#panel{position:absolute;top:58px;right:0;width:310px;height:calc(100vh - 58px);background:rgba(10,14,23,.97);border-left:1px solid var(--border);backdrop-filter:blur(16px);z-index:900;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1)}
 #panel.open{transform:translateX(0)}
 .ph{padding:14px 16px 11px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start}
 .cs{font-size:24px;font-weight:700;color:#fff;letter-spacing:2px;font-family:'Share Tech Mono',monospace}
@@ -47,18 +69,16 @@ body{background:var(--bg);font-family:'Barlow Condensed',sans-serif;color:var(--
 .tleg{margin:10px 16px;padding:9px 12px;background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.12);border-radius:3px;font-size:10px;color:var(--muted)}
 .tb{height:2px;background:linear-gradient(90deg,#1a3a6e,#006fa8,#00b4d8,#00d8a0,#39ff14,#ffd700);border-radius:1px;margin-bottom:5px}
 .tll{display:flex;justify-content:space-between;font-size:9px}
-#sbox{position:absolute;top:62px;left:14px;z-index:950;display:flex}
-#si{background:rgba(10,14,23,.93);border:1px solid var(--border);border-right:none;color:var(--text);padding:6px 12px;font-family:'Share Tech Mono',monospace;font-size:12px;width:165px;outline:none;text-transform:uppercase;letter-spacing:1px;border-radius:3px 0 0 3px}
-#si::placeholder{color:var(--muted);text-transform:none}
-#si:focus{border-color:var(--accent)}
-#sb{background:var(--accent);border:1px solid var(--accent);color:var(--bg);padding:6px 12px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:600;letter-spacing:1px;border-radius:0 3px 3px 0}
-#sb:hover{opacity:.8}
-#ltog{position:absolute;top:62px;left:193px;z-index:950;display:flex;flex-direction:column;gap:3px}
+
+/* ─── LAYER TOGGLE ─────────────────────────────────────────────────────────── */
+#ltog{position:absolute;top:68px;left:14px;z-index:950;display:flex;flex-direction:column;gap:3px}
 .lb{background:rgba(10,14,23,.93);border:1px solid var(--border);color:var(--text);padding:5px 10px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;border-radius:3px;transition:all .2s;white-space:nowrap}
 .lb.active{border-color:var(--accent);color:var(--accent)}
 .lb:hover{border-color:var(--accent)}
-.pt{background:rgba(10,14,23,.96)!important;border:1px solid var(--accent)!important;border-radius:3px!important;color:var(--text)!important;font-family:'Share Tech Mono',monospace!important;font-size:10px!important;padding:3px 7px!important;white-space:nowrap;box-shadow:0 0 8px rgba(0,212,255,.25)!important;line-height:1.6!important}
-#loading{position:absolute;inset:0;background:var(--bg);z-index:2000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
+.plane-el{cursor:pointer;display:block}
+.plane-tooltip{position:fixed;pointer-events:none;z-index:800;display:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}
+.plane-tooltip svg.tt-bg{position:absolute;top:0;left:0;width:100%;height:100%}
+.plane-tooltip .tt-inner{position:absolute;top:0;left:0;right:0;color:#111;font-family:'Open Sans',sans-serif;font-size:12px;font-weight:600;line-height:1;letter-spacing:.2px;padding:4px 9px;white-space:nowrap;display:flex;align-items:center;justify-content:center}#loading{position:absolute;inset:0;background:var(--bg);z-index:2000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
 .radar{position:relative;width:100px;height:100px}
 .radar::before,.radar::after{content:'';position:absolute;border-radius:50%;border:1px solid var(--accent)}
 .radar::before{inset:0;opacity:.25}
@@ -70,39 +90,55 @@ body{background:var(--bg);font-family:'Barlow Condensed',sans-serif;color:var(--
 @keyframes bk{50%{opacity:.25}}
 #notif{position:absolute;bottom:18px;left:50%;transform:translateX(-50%) translateY(60px);background:rgba(10,14,23,.96);border:1px solid var(--accent);color:var(--text);padding:7px 18px;border-radius:3px;font-size:12px;z-index:1100;transition:transform .3s;white-space:nowrap}
 #notif.show{transform:translateX(-50%) translateY(0)}
-.leaflet-control-zoom{display:none}
-.leaflet-attribution-flag{display:none!important}
-.leaflet-control-attribution{background:rgba(10,14,23,.7)!important;color:var(--muted)!important;font-size:8px!important}
-.leaflet-control-attribution a{color:var(--accent)!important}
-.leaflet-container,.leaflet-grab{cursor:pointer!important}
-.leaflet-dragging .leaflet-container,.leaflet-dragging .leaflet-grab{cursor:grabbing!important}
-.trail-fix{background:transparent!important;border:none!important}
-.trail-fix span{display:block;border-radius:1px}
-.trail-hover-target{cursor:pointer!important}
-.leaflet-interactive{cursor:inherit!important}
+#trail-canvas{position:fixed;top:0;left:0;pointer-events:none;z-index:400}
 </style>
 </head>
 <body>
-<div id="loading"><div class="radar"><div class="sweep"></div><div class="rdot"></div></div><div id="lt">CONNECTING...</div></div>
+<div id="loading">
+  <div class="radar"><div class="sweep"></div><div class="rdot"></div></div>
+  <div id="lt">CONNECTING...</div>
+  <div id="lp" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--muted);margin-top:8px;display:none">0 / 0</div>
+</div>
 <div id="map"></div>
-<div id="cbar" style="width:100%"></div>
+<canvas id="trail-canvas"></canvas>
 <div id="topbar">
-  <div class="logo"><div class="logo-dot"></div>VATSIM RADAR</div>
-  <div class="pill"><span class="lbl">Online</span><span class="val" id="sp">—</span></div>
-  <div class="pill"><span class="lbl">ATC</span><span class="val" id="sa">—</span></div>
-  <span id="last-update">—</span>
-  <button id="refresh-btn" onclick="doRefresh()">↺ Refresh</button>
+  <!-- Left: empty spacer -->
+  <div id="nav-left"></div>
+  <!-- Center: logo -->
+  <a id="nav-logo" href="#">
+    <img src="img/logo.svg" alt="Logo">
+  </a>
+  <!-- Right: UTC + search + menu -->
+  <div id="nav-right">
+    <div id="nav-utc"><span class="utc-time">00:00</span><span class="utc-label">UTC</span></div>
+    <div id="nav-search-wrap">
+      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="si" type="text" placeholder="Find flights, airports and more" autocomplete="off"/>
+      <span class="search-kbd">/</span>
+      <div id="search-dropdown">
+        <div class="sdrop-section-title">
+          <span>Search History</span>
+          <a id="clear-history-btn">Clear history</a>
+        </div>
+        <div id="search-history-list"></div>
+      </div>
+    </div>
+    <div id="nav-menu-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </div>
+  </div>
 </div>
-<div id="sbox">
-  <input id="si" type="text" placeholder="Callsign…"/>
-  <button id="sb" onclick="doSearch()">Find</button>
-</div>
+<div id="top-fade"></div>
 <div id="ltog">
   <button class="lb active" id="btn-sat" onclick="setLayer('sat')">🛰 SAT</button>
   <button class="lb" id="btn-dark" onclick="setLayer('dark')">🌑 DARK</button>
   <button class="lb" id="btn-osm" onclick="setLayer('osm')">🗺 OSM</button>
 </div>
 <div id="panel">
+  <div id="p-loader" style="position:absolute;inset:0;background:var(--bg);z-index:1000;display:none;flex-direction:column;align-items:center;justify-content:center;gap:15px;backdrop-filter:blur(10px)">
+    <div class="radar" style="width:70px;height:70px"><div class="sweep"></div><div class="rdot"></div></div>
+    <div style="font-size:12px;color:var(--accent);letter-spacing:3px;font-family:'Share Tech Mono',monospace;animation:bk 1.5s infinite">SYNCHRONIZING...</div>
+  </div>
   <div class="ph">
     <div><div class="cs" id="p-cs">—</div><div class="act" id="p-ac">—</div></div>
     <button id="close-panel" onclick="closePanel()">✕</button>
@@ -123,17 +159,18 @@ body{background:var(--bg);font-family:'Barlow Condensed',sans-serif;color:var(--
   <div class="st">Filed Route</div>
   <div class="rt" id="p-rt">No route filed</div>
   <div class="tleg">
-    <div class="tb"></div>
-    <div class="tll"><span>◀ Oldest</span><span>Newest ▶</span></div>
-    <div style="margin-top:5px;font-size:9px;color:var(--muted)">Dense when turning · sparse when straight</div>
+    <div class="tb" style="background:linear-gradient(90deg,rgb(255,255,255),rgb(0,255,12),rgb(0,255,228),rgb(0,0,255),rgb(174,0,255),rgb(255,0,228),rgb(255,0,0))"></div>
+    <div class="tll"><span>0m</span><span>3000m</span><span>6000m</span><span>9000m</span><span>11km</span><span>13km+</span></div>
+    <div style="margin-top:5px;font-size:9px;color:var(--muted)">Trail color = altitude · white=ground · red=high</div>
   </div>
 </div>
 <div id="notif"></div>
+<div class="plane-tooltip" id="tooltip"></div>
 
 <script>
 'use strict';
 
-// ─── FETCH ────────────────────────────────────────────────────────────────────
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
 var VURL = 'https://data.vatsim.net/v3/vatsim-data.json';
 var API_BASE = (window.VTRACKER_API_BASE || '').replace(/\/+$/, '');
 var HISTORY_LIMIT = 4000;
@@ -145,946 +182,933 @@ var PROXIES = [
   function(u){ return 'https://corsproxy.io/?url='+encodeURIComponent(u); },
   function(u){ return 'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u); }
 ];
-function apiUrl(path) {
-  return API_BASE ? (API_BASE + path) : path;
-}
-async function doFetch() {
-  if (API_BASE || location.protocol !== 'file:') {
-    try {
-      var direct = await fetch(apiUrl('/api/vatsim'), {cache:'no-store'});
-      if (direct.ok) return direct;
-    } catch(e) {}
+var TILE_URLS = {
+  sat:  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  dark: 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+  osm:  'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+};
+
+// ─── FETCH ────────────────────────────────────────────────────────────────────
+function apiUrl(p){ return API_BASE ? API_BASE+p : p; }
+async function doFetch(){
+  if(API_BASE||location.protocol!=='file:'){
+    try{var d=await fetch(apiUrl('/api/vatsim'),{cache:'no-store'});if(d.ok)return d;}catch(e){}
   }
-  for (var i = 0; i < PROXIES.length; i++) {
-    try {
-      var c = new AbortController();
-      var t = setTimeout(function(){ c.abort(); }, 8000);
-      var r = await fetch(PROXIES[i](VURL), {signal:c.signal, cache:'no-store'});
-      clearTimeout(t);
-      if (r.ok) return r;
-    } catch(e) {}
+  for(var i=0;i<PROXIES.length;i++){
+    try{
+      var c=new AbortController(),t=setTimeout(function(){c.abort();},8000);
+      var r=await fetch(PROXIES[i](VURL),{signal:c.signal,cache:'no-store'});
+      clearTimeout(t);if(r.ok)return r;
+    }catch(e){}
   }
   throw new Error('all proxies failed');
 }
 
 // ─── MATH ─────────────────────────────────────────────────────────────────────
-var D2R = Math.PI / 180, Rnm = 3440.065;
-function deadReckon(lat, lon, hdg, kts, hrs) {
-  var d = kts * hrs;
-  if (d < 1e-5) return [lat, lon];
-  var phi = lat*D2R, lam = lon*D2R, b = hdg*D2R, dr = d/Rnm;
-  var phi2 = Math.asin(Math.sin(phi)*Math.cos(dr) + Math.cos(phi)*Math.sin(dr)*Math.cos(b));
-  var lam2 = lam + Math.atan2(Math.sin(b)*Math.sin(dr)*Math.cos(phi), Math.cos(dr)-Math.sin(phi)*Math.sin(phi2));
-  return [phi2/D2R, ((lam2/D2R+540)%360)-180];
+var D2R=Math.PI/180;
+function deadReckon(lat,lon,hdg,kts,hrs){
+  var d=kts*hrs;if(d<1e-5)return[lat,lon];
+  var phi=lat*D2R,lam=lon*D2R,b=hdg*D2R,dr=d/3440.065;
+  var phi2=Math.asin(Math.sin(phi)*Math.cos(dr)+Math.cos(phi)*Math.sin(dr)*Math.cos(b));
+  var lam2=lam+Math.atan2(Math.sin(b)*Math.sin(dr)*Math.cos(phi),Math.cos(dr)-Math.sin(phi)*Math.sin(phi2));
+  return[phi2/D2R,((lam2/D2R+540)%360)-180];
 }
-function angleDiff(a, b) { // shortest angular distance a→b
-  return Math.abs(((b - a + 540) % 360) - 180);
-}
-function segmentAngle(a, b) {
-  var dy = b[0] - a[0];
-  var dx = b[1] - a[1];
-  return Math.atan2(dy, dx) * 180 / Math.PI;
-}
-function distSq(a, b) {
-  var dy = a[0] - b[0];
-  var dx = a[1] - b[1];
-  return dy * dy + dx * dx;
-}
-function headingSpeedToDelta(lat, hdg, kts) {
-  var nmPerMs = (kts || 0) / 3600000;
-  var br = (hdg || 0) * D2R;
-  var northNm = Math.cos(br) * nmPerMs;
-  var eastNm = Math.sin(br) * nmPerMs;
-  var cosLat = Math.cos(lat * D2R);
-  if (Math.abs(cosLat) < 1e-6) cosLat = cosLat < 0 ? -1e-6 : 1e-6;
-  return [
-    northNm / 60,
-    eastNm / (60 * cosLat)
-  ];
-}
-function hermitePoint(p0, p1, m0, m1, t) {
-  var t2 = t * t, t3 = t2 * t;
-  var h00 = 2 * t3 - 3 * t2 + 1;
-  var h10 = t3 - 2 * t2 + t;
-  var h01 = -2 * t3 + 3 * t2;
-  var h11 = t3 - t2;
-  return [
-    h00 * p0[0] + h10 * m0[0] + h01 * p1[0] + h11 * m1[0],
-    h00 * p0[1] + h10 * m0[1] + h01 * p1[1] + h11 * m1[1]
-  ];
-}
-function hermiteVelocity(p0, p1, m0, m1, t, durationMs) {
-  var t2 = t * t;
-  var dh00 = 6 * t2 - 6 * t;
-  var dh10 = 3 * t2 - 4 * t + 1;
-  var dh01 = -6 * t2 + 6 * t;
-  var dh11 = 3 * t2 - 2 * t;
-  var invDur = durationMs > 0 ? 1 / durationMs : 0;
-  return [
-    (dh00 * p0[0] + dh10 * m0[0] + dh01 * p1[0] + dh11 * m1[0]) * invDur,
-    (dh00 * p0[1] + dh10 * m0[1] + dh01 * p1[1] + dh11 * m1[1]) * invDur
-  ];
-}
-function currentMotionVelocity(motion, nowMs) {
-  if (!motion) return [0, 0];
-  var duration = motion.duration || 0;
-  if (duration <= 0) return motion.v1 || [0, 0];
-  var t = Math.max(0, Math.min(1, (nowMs - motion.start) / duration));
-  var m0 = [(motion.v0 || [0, 0])[0] * duration, (motion.v0 || [0, 0])[1] * duration];
-  var m1 = [(motion.v1 || [0, 0])[0] * duration, (motion.v1 || [0, 0])[1] * duration];
-  return hermiteVelocity(motion.from, motion.to, m0, m1, t, duration);
-}
-function getDisplayedTrail(cs, nowMs) {
-  var samples = gSamples[cs] || [];
-  if (!samples.length) return [];
-  if (samples.length === 1) return [[samples[0].lat, samples[0].lon]];
 
-  var displayTime = nowMs - gPlaybackDelay;
-  var pts = [];
-  var i;
+// ─── POSITION HISTORY ─────────────────────────────────────────────────────────
+// gFixes[cs] = array of {lat,lon,alt,hdg,spd,t} — real VATSIM fixes only, ms timestamps
+// No dead-reckoned points stored. Interpolation happens at display time only.
+var gFixes = {};
 
-  for (i = 0; i < samples.length; i++) {
-    if (samples[i].t <= displayTime) pts.push([samples[i].lat, samples[i].lon]);
-    else break;
+function pushFix(cs, p, fallbackT) {
+  if(!gFixes[cs]) gFixes[cs] = [];
+  var fixes = gFixes[cs];
+  // Prefer the pilot's own last_updated timestamp for accuracy; fall back to fetch time
+  var t = fallbackT;
+  if(p.last_updated) {
+    var lu = Date.parse(p.last_updated);
+    if(!isNaN(lu) && lu > 0) t = lu;
+  }
+  var last = fixes[fixes.length-1];
+  // Ensure we always move forward in time and space
+  if(last && (t <= last.t || (last.lat===p.latitude && last.lon===p.longitude))) return;
+  fixes.push({lat:p.latitude, lon:p.longitude, alt:p.altitude||0, hdg:p.heading||0, spd:p.groundspeed||0, t:t});
+  if(fixes.length > HISTORY_LIMIT) fixes.shift();
+}
+
+var PLAYBACK_LAG_MS = 20000; // 20 seconds lag to ensure smooth interpolation
+
+// Compute true bearing from f1 to f2 using lat/lon positions
+function bearingBetween(f1, f2) {
+  var dLon = (f2.lon - f1.lon) * D2R;
+  var lat1 = f1.lat * D2R, lat2 = f2.lat * D2R;
+  var y = Math.sin(dLon) * Math.cos(lat2);
+  var x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return (Math.atan2(y, x) / D2R + 360) % 360;
+}
+
+// Interpolate between two GPS fixes
+function interpolateFix(f1, f2, targetT) {
+  var pct = Math.max(0, Math.min(1, (targetT - f1.t) / (f2.t - f1.t || 1)));
+
+  // Lat/Lon
+  var lat = f1.lat + (f2.lat - f1.lat) * pct;
+  var lon = f1.lon + (f2.lon - f1.lon) * pct;
+  if(Math.abs(f2.lon - f1.lon) > 180) {
+    if(f2.lon > f1.lon) lon = (f1.lon + (f2.lon - 360 - f1.lon) * pct + 180) % 360 - 180;
+    else lon = (f1.lon + (f2.lon + 360 - f1.lon) * pct + 180) % 360 - 180;
   }
 
-  if (i === 0) return [[samples[0].lat, samples[0].lon]];
-  if (i >= samples.length) {
-    if (samples.length >= 2) {
-      var la = samples[samples.length - 2];
-      var lb = samples[samples.length - 1];
-      var lspan = Math.max(1, lb.t - la.t);
-      var lt = (displayTime - lb.t) / lspan;
-      if (lt > 0) {
-        pts.push([
-          lb.lat + (lb.lat - la.lat) * lt,
-          lb.lon + (lb.lon - la.lon) * lt
-        ]);
-      }
+  // Altitude
+  var alt = f1.alt + (f2.alt - f1.alt) * pct;
+
+  // Heading: derive from position delta (fixes from DB have hdg=0, so stored hdg is unreliable)
+  var hdg;
+  var dist = Math.abs(f2.lat - f1.lat) + Math.abs(f2.lon - f1.lon);
+  if(dist > 0.0001) {
+    hdg = bearingBetween(f1, f2);
+  } else if(f1.hdg || f2.hdg) {
+    var h1 = f1.hdg||0, h2 = f2.hdg||0;
+    var diff = h2 - h1;
+    while(diff > 180) diff -= 360;
+    while(diff < -180) diff += 360;
+    hdg = (h1 + diff * pct + 360) % 360;
+  } else {
+    hdg = 0;
+  }
+
+  return {lat:lat, lon:lon, alt:alt, hdg:hdg};
+}
+
+// Get aircraft position by interpolating the history trail
+function getDeadReckonedPos(p, nowMs) {
+  var cs = p.callsign;
+  var fixes = gFixes[cs];
+  if(!fixes || fixes.length === 0) {
+    return {lat:p.latitude, lon:p.longitude, alt:p.altitude||0, hdg:p.heading||0};
+  }
+
+  var targetT = nowMs - PLAYBACK_LAG_MS;
+  
+  // If target is before our earliest data
+  if(targetT <= fixes[0].t) {
+    return {lat:fixes[0].lat, lon:fixes[0].lon, alt:fixes[0].alt, hdg:fixes[0].hdg};
+  }
+
+  // If target is beyond our latest data, dead-reckon from the last point.
+  // Derive heading from the last two fixes (DB fixes have hdg=0, so position delta is more reliable).
+  if(targetT >= fixes[fixes.length - 1].t) {
+    var last = fixes[fixes.length - 1];
+    var hdgUse = p.heading||0;
+    if(fixes.length >= 2) {
+      var prev = fixes[fixes.length - 2];
+      var dist = Math.abs(last.lat - prev.lat) + Math.abs(last.lon - prev.lon);
+      if(dist > 0.0001) hdgUse = bearingBetween(prev, last);
+      else if(last.hdg) hdgUse = last.hdg;
+    } else if(last.hdg) {
+      hdgUse = last.hdg;
     }
-    return pts;
+    var elapsedHrs = Math.max(0, (targetT - last.t)) / 3600000;
+    var dr = deadReckon(last.lat, last.lon, hdgUse, p.groundspeed||0, elapsedHrs);
+    return {lat:dr[0], lon:dr[1], alt:last.alt, hdg:hdgUse};
   }
 
-  var a = samples[i - 1];
-  var b = samples[i];
-  var span = Math.max(1, b.t - a.t);
-  var t = Math.max(0, Math.min(1, (displayTime - a.t) / span));
-  var interp = [
-    a.lat + (b.lat - a.lat) * t,
-    a.lon + (b.lon - a.lon) * t
-  ];
-  var last = pts[pts.length - 1];
-  if (!last || Math.abs(last[0] - interp[0]) > 1e-8 || Math.abs(last[1] - interp[1]) > 1e-8) pts.push(interp);
-  return pts;
+  // Find the two points to interpolate between (Scan from end for speed)
+  var i = fixes.length - 2;
+  while(i > 0 && fixes[i].t > targetT) i--;
+  
+  return interpolateFix(fixes[i], fixes[i+1], targetT);
 }
-function buildLinePath(pts, zoom) {
-  if (!pts || pts.length < 4) return pts || [];
-  var segs = zoom <= 6 ? 5 : (zoom <= 9 ? 3 : 2);
-  var out = [pts[0]];
-  for (var i = 0; i < pts.length - 1; i++) {
-    var p0 = pts[Math.max(0, i - 1)];
-    var p1 = pts[i];
-    var p2 = pts[i + 1];
-    var p3 = pts[Math.min(pts.length - 1, i + 2)];
-    for (var s = 1; s <= segs; s++) {
-      var t = s / segs;
-      var t2 = t * t;
-      var t3 = t2 * t;
-      out.push([
-        0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
-        0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
-      ]);
-    }
+
+// Trail = GPS fixes up to the current display time (lagged), so the marker always sits at the tip
+// Returns [lat, lon, alt, t] — timestamp included so drawTrailCanvas can detect gaps.
+function getTrail(cs) {
+  var fixes = gFixes[cs] || [];
+  var cutoff = Date.now() - PLAYBACK_LAG_MS;
+  var result = [];
+  for(var i = 0; i < fixes.length; i++) {
+    if(fixes[i].t <= cutoff) result.push([fixes[i].lat, fixes[i].lon, fixes[i].alt, fixes[i].t]);
   }
-  return out;
+  return result;
 }
-function hoverRadiusForZoom() {
-  if (!gMap) return 7;
-  return Math.max(4, Math.min(7.5, 10 - gMap.getZoom() * 0.45));
-}
-function mergeStoredSamples(cs, rows) {
-  if (!rows || !rows.length) return;
-  var merged = [];
+
+// ─── DB HISTORY ───────────────────────────────────────────────────────────────
+
+function mergeHistoryPoints(cs, rows) {
+  if(!rows||!rows.length) return;
+  if(!gFixes[cs]) gFixes[cs] = [];
+  var existing = gFixes[cs];
   var seen = Object.create(null);
-  (rows || []).forEach(function(r) {
-    if (typeof r.lat !== 'number' || typeof r.lon !== 'number') return;
-    var t = Number(r.observed_at || r.t || 0);
-    var key = t + '|' + r.lat + '|' + r.lon;
-    if (seen[key]) return;
+  existing.forEach(function(f){ seen[f.t+'|'+f.lat+'|'+f.lon]=1; });
+
+  var now = Date.now();
+  var added = [];
+  rows.forEach(function(r){
+    if(typeof r.lat!=='number'||typeof r.lon!=='number') return;
+    var t = Number(r.observed_at||r.t||0);
+    if(t < 1e10) t = t * 1000; // seconds to ms
+    if(t > now) t = now; // Cap future timestamps
+    var key = t+'|'+r.lat+'|'+r.lon;
+    if(seen[key]) return;
     seen[key] = 1;
-    merged.push({lat: r.lat, lon: r.lon, t: t});
+    added.push({lat:r.lat, lon:r.lon, alt:Number(r.alt||r.altitude||0), hdg:0, spd:0, t:t});
   });
-  (gSamples[cs] || []).forEach(function(r) {
-    var t = Number(r.t || r.observed_at || 0);
-    var key = t + '|' + r.lat + '|' + r.lon;
-    if (seen[key]) return;
-    seen[key] = 1;
-    merged.push({lat: r.lat, lon: r.lon, t: t});
-  });
-  merged.sort(function(a, b){ return a.t - b.t; });
-  if (merged.length > HISTORY_LIMIT) merged = merged.slice(merged.length - HISTORY_LIMIT);
-  gSamples[cs] = merged;
-  gTrailPts[cs] = merged.map(function(r){ return [r.lat, r.lon]; });
-}
-async function loadStoredHistory(cs) {
-  if (!cs || gHistoryLoaded[cs] || gHistoryLoading[cs]) return;
-  if (!(API_BASE || location.protocol !== 'file:')) return;
-  gHistoryLoading[cs] = true;
-  try {
-    var r = await fetch(apiUrl('/api/history?callsign=' + encodeURIComponent(cs) + '&limit=' + HISTORY_LIMIT), {cache:'no-store'});
-    if (!r.ok) return;
-    var data = await r.json();
-    mergeStoredSamples(cs, data.points || []);
-    gHistoryLoaded[cs] = true;
-    if (gSelected === cs) redrawTrail();
-  } catch (e) {
-    console.warn('history load failed', e);
-  } finally {
-    delete gHistoryLoading[cs];
+
+  var merged = existing.concat(added);
+  merged.sort(function(a,b){return a.t-b.t;});
+  // Ensure strict chronological order after merge (remove any non-forward steps if any)
+  var finalFixes = [];
+  for(var i=0; i<merged.length; i++) {
+    var f = merged[i];
+    if(i > 0 && f.t <= merged[i-1].t) continue; 
+    finalFixes.push(f);
   }
-}
-async function backfillHistoryForCallsign(cs) {
-  if (!cs || gHistoryLoaded[cs] || gHistoryLoading[cs]) return;
-  if (!(API_BASE || location.protocol !== 'file:')) return;
-  gHistoryLoading[cs] = true;
-  try {
-    var cursor = gHistoryCursor[cs] || 0;
-    while (true) {
-      var url = apiUrl('/api/history?callsign=' + encodeURIComponent(cs) + '&limit=' + HISTORY_BATCH_LIMIT + (cursor ? '&before=' + encodeURIComponent(cursor) : ''));
-      var r = await fetch(url, {cache:'no-store'});
-      if (!r.ok) break;
-      var data = await r.json();
-      var points = data.points || [];
-      if (points.length) mergeStoredSamples(cs, points);
-      if (points.length < HISTORY_BATCH_LIMIT) {
-        gHistoryLoaded[cs] = true;
-        delete gHistoryCursor[cs];
-        break;
-      }
-      cursor = Number(points[0].observed_at || 0);
-      if (!cursor) {
-        gHistoryLoaded[cs] = true;
-        delete gHistoryCursor[cs];
-        break;
-      }
-      gHistoryCursor[cs] = cursor;
-      if (gSelected === cs) redrawTrail();
-      await new Promise(function(resolve){ setTimeout(resolve, 0); });
+  if(finalFixes.length > HISTORY_LIMIT) finalFixes = finalFixes.slice(finalFixes.length - HISTORY_LIMIT);
+
+  // Remove outlier fixes: if a point is far from both its neighbors relative to the
+  // time gap, it's a bad GPS fix. Max plausible speed ~700kts = ~0.2deg/s lat/lon.
+  var cleaned = [];
+  for(var i=0; i<finalFixes.length; i++){
+    var f = finalFixes[i];
+    var prev = finalFixes[i-1], next = finalFixes[i+1];
+    if(prev && next){
+      var dtPrev = (f.t - prev.t) / 1000; // seconds
+      var dtNext = (next.t - f.t) / 1000;
+      var maxDistPrev = Math.max(0.05, dtPrev * 0.22); // 0.22 deg/s ≈ 800kts
+      var maxDistNext = Math.max(0.05, dtNext * 0.22);
+      var dPrev = Math.abs(f.lat-prev.lat) + Math.abs(f.lon-prev.lon);
+      var dNext = Math.abs(f.lat-next.lat) + Math.abs(f.lon-next.lon);
+      // Skip if this point is implausibly far from BOTH neighbors
+      if(dPrev > maxDistPrev && dNext > maxDistNext){ continue; }
     }
-    if (gSelected === cs) redrawTrail();
-  } catch (e) {
-    console.warn('history backfill failed', e);
-  } finally {
-    delete gHistoryLoading[cs];
-    gActiveHistoryLoads = Math.max(0, gActiveHistoryLoads - 1);
-    pumpHistoryQueue();
+    cleaned.push(f);
+  }
+
+  gFixes[cs] = cleaned;
+}
+
+async function loadStoredHistory(cs){
+  if(!cs||gHistoryLoaded[cs]||gHistoryLoading[cs]) return;
+  if(!(API_BASE||location.protocol!=='file:')) return;
+  gHistoryLoading[cs]=true;
+  try{
+    var r=await fetch(apiUrl('/api/history?callsign='+encodeURIComponent(cs)+'&limit='+HISTORY_LIMIT),{cache:'no-store'});
+    if(!r.ok) return;
+    var data=await r.json();
+    mergeHistoryPoints(cs, data.points||[]);
+    gHistoryLoaded[cs]=true;
+    if(gSelected===cs) drawTrailCanvas();
+  }catch(e){}finally{delete gHistoryLoading[cs];}
+}
+
+// Loads history for many planes concurrently during first start
+async function loadAllHistoryBatch(callsigns) {
+  var concurrency = 20; // Fast concurrent loading
+  var queue = callsigns.slice();
+  var total = queue.length;
+  var count = 0;
+  var lp = document.getElementById('lp');
+  lp.style.display = 'block';
+  document.getElementById('lt').textContent = 'SYNCHRONIZING HISTORY...';
+
+  async function worker() {
+    while(queue.length > 0) {
+      var cs = queue.shift();
+      if(!cs) continue;
+      await loadStoredHistory(cs);
+      count++;
+      lp.textContent = count + ' / ' + total + ' AIRCRAFT';
+    }
+  }
+
+  var workers = [];
+  for(var i=0; i<concurrency; i++) workers.push(worker());
+  await Promise.all(workers);
+}
+
+// ─── ICONS — realistic top-down plane silhouettes ─────────────────────────────
+var ICON_SVGS={
+  narrow:
+    '<path d="M50,4 C49,4 48,6 48,9 L47,30 L8,44 L8,50 L47,42 L46,60 L39,64 L39,70 L46,68 L50,71 L54,68 L61,70 L61,64 L54,60 L53,42 L92,50 L92,44 L53,30 L52,9 C52,6 51,4 50,4 Z"/>'
+    +'<ellipse cx="22" cy="47" rx="5" ry="3"/>'
+    +'<ellipse cx="78" cy="47" rx="5" ry="3"/>',
+  wide:
+    '<path d="M50,3 C48,3 46,5 46,9 L44,28 L3,43 L3,51 L44,44 L43,62 L34,67 L34,74 L43,71 L50,75 L57,71 L66,74 L66,67 L57,62 L56,44 L97,51 L97,43 L56,28 L54,9 C54,5 52,3 50,3 Z"/>'
+    +'<ellipse cx="16" cy="47" rx="6" ry="3.5"/>'
+    +'<ellipse cx="30" cy="46" rx="5" ry="3"/>'
+    +'<ellipse cx="70" cy="46" rx="5" ry="3"/>'
+    +'<ellipse cx="84" cy="47" rx="6" ry="3.5"/>',
+  regional:
+    '<path d="M50,5 C49,5 48,7 48,10 L47,32 L12,44 L12,50 L47,44 L46,60 L40,64 L40,69 L46,67 L50,70 L54,67 L60,69 L60,64 L54,60 L53,44 L88,50 L88,44 L53,32 L52,10 C52,7 51,5 50,5 Z"/>'
+    +'<ellipse cx="46" cy="63" rx="3" ry="5"/>'
+    +'<ellipse cx="54" cy="63" rx="3" ry="5"/>',
+  bizjet:
+    '<path d="M50,3 C49,3 48,5 48,8 L47,30 L16,41 L16,46 L47,41 L46,57 L40,61 L40,66 L46,64 L50,67 L54,64 L60,66 L60,61 L54,57 L53,41 L84,46 L84,41 L53,30 L52,8 C52,5 51,3 50,3 Z"/>'
+    +'<ellipse cx="46" cy="60" rx="2.5" ry="4.5"/>'
+    +'<ellipse cx="54" cy="60" rx="2.5" ry="4.5"/>',
+  turboprop:
+    '<path d="M50,6 C49,6 48,8 48,11 L47,29 L14,40 L14,46 L47,41 L46,57 L40,61 L40,66 L46,64 L50,67 L54,64 L60,66 L60,61 L54,57 L53,41 L86,46 L86,40 L53,29 L52,11 C52,8 51,6 50,6 Z"/>'
+    +'<ellipse cx="50" cy="9" rx="12" ry="3" opacity="0.6"/>',
+  fighter:
+    '<path d="M50,2 L54,18 L80,36 L77,43 L57,32 L56,50 L63,56 L59,63 L50,56 L41,63 L37,56 L44,50 L43,32 L23,43 L20,36 L46,18 Z"/>'
+    +'<path d="M43,53 L38,68 L44,65 Z"/>'
+    +'<path d="M57,53 L62,68 L56,65 Z"/>',
+  heli:
+    '<ellipse cx="50" cy="38" rx="9" ry="14"/>'
+    +'<ellipse cx="50" cy="24" rx="26" ry="4" opacity="0.55"/>'
+    +'<rect x="49" y="51" width="2" height="16" rx="1"/>'
+    +'<ellipse cx="50" cy="67" rx="7" ry="2" opacity="0.55"/>',
+  glider:
+    '<path d="M50,9 L52,26 L97,33 L97,38 L52,33 L52,54 L56,58 L56,63 L50,60 L44,63 L44,58 L48,54 L48,33 L3,38 L3,33 L48,26 Z"/>',
+  drone:
+    '<line x1="25" y1="25" x2="75" y2="75" stroke-width="6" stroke-linecap="round"/>'
+    +'<line x1="75" y1="25" x2="25" y2="75" stroke-width="6" stroke-linecap="round"/>'
+    +'<circle cx="25" cy="25" r="10"/><circle cx="75" cy="25" r="10"/>'
+    +'<circle cx="25" cy="75" r="10"/><circle cx="75" cy="75" r="10"/>'
+    +'<circle cx="50" cy="50" r="6"/>'
+};
+var AIRCRAFT_GROUPS={
+  heli:['B412','B429','B430','B505','EC35','EC45','EC55','EC75','H125','H130','H135','H145','H160','R44','R66','S92','UH60','A109','A139'],
+  glider:['GLID','DG10','DG50','ASK21','ASW2','DUOD'],
+  fighter:['F16','F18','FA18','F22','F35','EUFI','TYPH','M346','L39','A10','SU27','MIG2','MIG3','T38'],
+  drone:['UAV','DRON','MQ9','RQ4'],
+  turboprop:['DH8D','DH8C','DH8A','AT72','AT76','AT45','AT43','AT46','SF34','C208','PC12','BE20','B190','JS32','E120','L410'],
+  bizjet:['C25A','C25B','C25C','C25M','C500','C510','C525','C550','C560','C650','C680','C700','CL30','CL35','CL60','E35L','E45X','E50P','E55P','FA50','FA7X','F2TH','F900','GL5T','GL6T','HDJT','LJ35','LJ45','LJ60'],
+  regional:['CRJ2','CRJ7','CRJ9','CRJX','E170','E175','E190','E195','F100','F70'],
+  wide:['A332','A333','A339','A342','A343','A345','A346','A359','A35K','A388','B741','B742','B743','B744','B748','B763','B764','B772','B773','B77L','B77W','B788','B789','B78X','MD11']
+};
+function aircraftTypeFor(p){
+  var fp=p&&p.flight_plan,raw=(fp&&(fp.aircraft_short||fp.aircraft))||'';
+  var m=String(raw).toUpperCase().match(/[A-Z0-9]{3,4}/),code=m?m[0]:'';
+  if(!code)return'narrow';
+  for(var k in AIRCRAFT_GROUPS)if(AIRCRAFT_GROUPS[k].indexOf(code)!==-1)return k;
+  if(/^(B7|A3|A2)/.test(code))return'narrow';
+  if(/^(C1|C2|C3|LJ|BE|PC|FA|GL|CL)/.test(code))return'bizjet';
+  return'narrow';
+}
+function makePlaneHTML(hdg,sel,p){
+  var type=aircraftTypeFor(p||{});
+  var emergency=String((p&&p.transponder)||'')==='7700';
+  var sz=26; // always same size, no growth on select
+  var fill=emergency?'#e02020':(sel?'#ec5c5c':'#ffd000');
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="'+sz+'" height="'+sz+'" viewBox="0 0 100 100" style="display:block">'
+    +'<g transform="rotate('+hdg+' 50 50)" fill="'+fill+'" stroke="rgba(0,0,0,0.5)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">'
+    +(ICON_SVGS[type]||ICON_SVGS.narrow)
+    +'</g></svg>';
+}
+
+// ─── AIRPORT ELEVATION LOOKUP (for AAL coloring) ──────────────────────────────
+var gAirportElevFt = {}; // ICAO -> elevation in feet cache
+var gAirportElevPending = {}; // ICAO -> true if fetch in-flight
+var gSelectedArrivalElev = 0; // elevation ft of selected flight's arrival airport
+
+async function fetchAirportElev(icao) {
+  if(!icao||icao==='----'||icao==='???')return;
+  icao=icao.toUpperCase().trim();
+  if(icao in gAirportElevFt||gAirportElevPending[icao])return;
+  gAirportElevPending[icao]=true;
+  try {
+    // open-meteo elevation API — gives terrain elevation at lat/lon
+    // First resolve ICAO to lat/lon via aviationweather.gov
+    var r=await fetch('https://aviationweather.gov/api/data/airport?ids='+icao+'&format=json',{cache:'no-store'});
+    if(!r.ok)throw new Error();
+    var data=await r.json();
+    if(data&&data[0]&&typeof data[0].elev==='number'){
+      gAirportElevFt[icao]=data[0].elev;
+    } else {
+      gAirportElevFt[icao]=0;
+    }
+  } catch(e){
+    gAirportElevFt[icao]=0;
+  }
+  delete gAirportElevPending[icao];
+  // If this is the currently selected plane's arrival, update and redraw
+  if(gSelected){
+    var p=gPilots.get(gSelected);
+    var arr=p&&p.flight_plan&&p.flight_plan.arrival;
+    if(arr&&arr.toUpperCase()===icao){
+      gSelectedArrivalElev=gAirportElevFt[icao]||0;
+      drawTrailCanvas();
+    }
   }
 }
-function queueHistoryLoad(cs) {
-  if (!cs || gHistoryLoaded[cs] || gHistoryLoading[cs] || gHistoryQueued[cs]) return;
-  gHistoryQueued[cs] = true;
-  gHistoryQueue.push(cs);
-}
-function pumpHistoryQueue() {
-  while (gActiveHistoryLoads < HISTORY_CONCURRENCY && gHistoryQueue.length) {
-    var cs = gHistoryQueue.shift();
-    delete gHistoryQueued[cs];
-    if (!cs || gHistoryLoaded[cs] || gHistoryLoading[cs]) continue;
-    gActiveHistoryLoads++;
-    backfillHistoryForCallsign(cs);
+
+function updateSelectedArrivalElev(p) {
+  var icao=p&&p.flight_plan&&p.flight_plan.arrival;
+  if(!icao){gSelectedArrivalElev=0;return;}
+  icao=icao.toUpperCase().trim();
+  if(icao in gAirportElevFt){
+    gSelectedArrivalElev=gAirportElevFt[icao]||0;
+  } else {
+    gSelectedArrivalElev=0;
+    fetchAirportElev(icao);
   }
 }
-async function loadStoredHistoryBatch(callsigns) {
-  if (!(API_BASE || location.protocol !== 'file:')) return;
-  var pending = (callsigns || []).filter(function(cs) {
-    return cs && !gHistoryLoaded[cs] && !gHistoryLoading[cs] && !gHistoryQueued[cs];
-  });
-  if (!pending.length) return;
 
-  pending.slice(0, HISTORY_BATCH_SIZE).forEach(function(cs) {
-    queueHistoryLoad(cs);
-  });
-  pumpHistoryQueue();
-}
-
-// ─── PLANE ICON — Canvas-drawn FR24 silhouette ────────────────────────────────
-var IC = {};
-var gSpriteImage = null;
-function makePlaneIcon(hdg, sel) {
-  var key = (Math.round(hdg/2)*2) + '_' + (sel?1:0);
-  if (IC[key]) return IC[key];
-
-  var sz  = sel ? 30 : 22;
-  var cnv = document.createElement('canvas');
-  cnv.width = cnv.height = sz;
-  var ctx = cnv.getContext('2d');
-  var s   = sz / 30; // scale to canvas size
-
-  ctx.save();
-  ctx.translate(sz/2, sz/2);
-  ctx.rotate(hdg * D2R);
-
-  // Glow
-  ctx.shadowColor = sel ? 'rgba(255,100,30,.9)' : 'rgba(0,200,255,.55)';
-  ctx.shadowBlur  = sel ? 7 : 3;
-
-  ctx.fillStyle   = sel ? '#ff6820' : '#ffffff';
-  ctx.strokeStyle = sel ? 'rgba(255,80,0,.2)' : 'rgba(150,220,255,.2)';
-  ctx.lineWidth   = 0.6;
-
-  // Top-down airliner silhouette — nose points UP (negative Y)
-  ctx.beginPath();
-  ctx.moveTo(0,       -12*s);   // nose tip
-  // right wing sweep
-  ctx.bezierCurveTo( 1*s, -7*s,  11*s, -2*s,  11*s,  0);
-  ctx.bezierCurveTo( 11*s, 1.5*s, 4.5*s, 3*s,  2.5*s, 4*s);
-  // right fuselage
-  ctx.lineTo(2*s,   7*s);
-  // right stabilizer
-  ctx.bezierCurveTo(2*s, 8*s,  6.5*s,  8.5*s, 6.5*s, 10*s);
-  ctx.bezierCurveTo(6.5*s, 11.5*s, 2.5*s, 11.5*s, 1.5*s, 10.5*s);
-  // tail
-  ctx.lineTo(1*s,   12*s);
-  ctx.lineTo(0,     11.5*s);
-  ctx.lineTo(-1*s,  12*s);
-  ctx.lineTo(-1.5*s, 10.5*s);
-  ctx.bezierCurveTo(-2.5*s, 11.5*s, -6.5*s, 11.5*s, -6.5*s, 10*s);
-  ctx.bezierCurveTo(-6.5*s, 8.5*s, -2*s, 8*s, -2*s, 7*s);
-  // left fuselage
-  ctx.lineTo(-2.5*s, 4*s);
-  ctx.bezierCurveTo(-4.5*s, 3*s, -11*s, 1.5*s, -11*s, 0);
-  ctx.bezierCurveTo(-11*s, -2*s, -1*s, -7*s, 0, -12*s);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-
-  var icon = L.icon({
-    iconUrl:    cnv.toDataURL(),
-    iconSize:   [sz, sz],
-    iconAnchor: [sz/2, sz/2]
-  });
-  IC[key] = icon;
-  return icon;
-}
-
-var ICON_SVGS = {
-  narrow: '<path d="M32 4 L35 16 L53 23 L53 28 L37 27 L35 38 L41 53 L37 58 L32 46 L27 58 L23 53 L29 38 L27 27 L11 28 L11 23 L29 16 Z"/>',
-  wide: '<path d="M32 3 L36 17 L58 24 L58 30 L38 29 L36 40 L44 56 L39 61 L32 48 L25 61 L20 56 L28 40 L26 29 L6 30 L6 24 L28 17 Z"/>',
-  regional: '<path d="M32 6 L34 17 L47 22 L47 26 L36 26 L34 38 L39 50 L36 54 L32 44 L28 54 L25 50 L30 38 L28 26 L17 26 L17 22 L30 17 Z"/>',
-  bizjet: '<path d="M32 5 L34 16 L44 20 L50 22 L50 25 L37 25 L35 35 L41 47 L37 51 L32 42 L27 51 L23 47 L29 35 L27 25 L14 25 L14 22 L20 20 L30 16 Z"/>',
-  turboprop: '<path d="M32 6 L34 16 L43 20 L43 24 L36 24 L34 38 L39 50 L35 54 L32 44 L29 54 L25 50 L30 38 L28 24 L21 24 L21 20 L30 16 Z"/><path d="M46 18 h7 M49 15 v6 M11 18 h7 M14 15 v6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
-  fighter: '<path d="M32 4 L36 18 L48 24 L41 28 L39 39 L45 51 L39 54 L32 42 L25 54 L19 51 L25 39 L23 28 L16 24 L28 18 Z"/>',
-  heli: '<path d="M28 16 h20 a4 4 0 0 1 4 4 v8 a4 4 0 0 1 -4 4 H36 l-6 10 h-5 l3-10 h-4 a4 4 0 0 1 -4 -4 v-8 a4 4 0 0 1 4 -4 h4 Z"/><path d="M6 19 H58 M32 8 V19 M17 12 l8 7 M47 12 l-8 7 M22 45 h20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
-  glider: '<path d="M32 7 L34 18 L60 23 L60 26 L34 24 L33 41 L37 51 L34 54 L32 45 L30 54 L27 51 L31 41 L30 24 L4 26 L4 23 L30 18 Z"/>',
-  drone: '<circle cx="20" cy="20" r="4"/><circle cx="44" cy="20" r="4"/><circle cx="20" cy="44" r="4"/><circle cx="44" cy="44" r="4"/><path d="M24 24 L40 40 M40 24 L24 40" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/>'
-};
-var AIRCRAFT_GROUPS = {
-  heli: ['B412','B429','B430','B505','EC35','EC45','EC55','EC75','H125','H130','H135','H145','H160','R44','R66','S92','UH60','A109','A139'],
-  glider: ['GLID','DG10','DG50','ASK21','ASW2','DUOD'],
-  fighter: ['F16','F18','FA18','F22','F35','EUFI','TYPH','M346','L39','A10','SU27','MIG2','MIG3','T38'],
-  drone: ['UAV','DRON','MQ9','RQ4'],
-  turboprop: ['DH8D','DH8C','DH8A','AT72','AT76','AT45','AT43','AT46','SF34','C208','PC12','BE20','B190','JS32','E120','L410'],
-  bizjet: ['C25A','C25B','C25C','C25M','C500','C510','C525','C550','C560','C650','C680','C700','CL30','CL35','CL60','E35L','E45X','E50P','E55P','FA50','FA7X','F2TH','F900','GL5T','GL6T','HDJT','LJ35','LJ45','LJ60'],
-  regional: ['CRJ2','CRJ7','CRJ9','CRJX','E170','E175','E190','E195','F100','F70'],
-  wide: ['A332','A333','A339','A342','A343','A345','A346','A359','A35K','A388','B741','B742','B743','B744','B748','B763','B764','B772','B773','B77L','B77W','B788','B789','B78X','MD11']
-};
-function aircraftCodeOf(p) {
-  var fp = p && p.flight_plan;
-  var raw = (fp && (fp.aircraft_short || fp.aircraft)) || '';
-  var m = String(raw).toUpperCase().match(/[A-Z0-9]{3,4}/);
-  return m ? m[0] : '';
-}
-function iconTypeForPilot(p) {
-  var code = aircraftCodeOf(p);
-  if (!code) return 'narrow';
-  for (var kind in AIRCRAFT_GROUPS) if (AIRCRAFT_GROUPS[kind].indexOf(code) !== -1) return kind;
-  if (/^(B7|A3|A2)/.test(code)) return 'narrow';
-  if (/^(C1|C2|C3|LJ|BE|PC|FA|GL|CL)/.test(code)) return 'bizjet';
-  return 'narrow';
-}
-function makePlaneIcon(hdg, sel, p) {
-  var type = iconTypeForPilot(p || {});
-  var emergency = String((p && p.transponder) || '') === '7700';
-  var key = 'svg_' + (Math.round(hdg/2)*2) + '_' + (sel?1:0) + '_' + type + '_' + (emergency?1:0);
-  if (IC[key]) return IC[key];
-  var sz = sel ? 34 : 24;
-  var fill = emergency ? '#ff3b30' : (sel ? '#ff6820' : '#ffd33d');
-  var stroke = emergency ? '#7f120c' : (sel ? '#7a2f00' : '#604b00');
-  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + sz + '" height="' + sz + '" viewBox="0 0 64 64">'
-    + '<g transform="rotate(' + hdg + ' 32 32)" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" color="' + fill + '">'
-    + (ICON_SVGS[type] || ICON_SVGS.narrow)
-    + '</g></svg>';
-  var icon = L.icon({
-    iconUrl: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
-    iconSize: [sz, sz],
-    iconAnchor: [sz/2, sz/2]
-  });
-  IC[key] = icon;
-  return icon;
-}
-
-var ICON_SPRITES = {
-  narrow:     {x:151,  y:532, w:92,  h:120},
-  wide:       {x:647,  y:532, w:89,  h:132},
-  regional:   {x:892,  y:390, w:92,  h:107},
-  bizjet:     {x:377,  y:405, w:96,  h:82},
-  turboprop:  {x:535,  y:255, w:68,  h:84},
-  fighter:    {x:649,  y:246, w:78,  h:101},
-  heli:       {x:241,  y:244, w:97,  h:105},
-  glider:     {x:364,  y:263, w:144, h:40},
-  drone:      {x:1103, y:256, w:77,  h:83}
-};
-var SPRITE_W = 1280, SPRITE_H = 722;
-function iconMaxDim(sel) {
-  var z = gMap ? gMap.getZoom() : 3;
-  var base = sel ? 24 : 18;
-  var grown = base + Math.max(0, z - 3) * 2.2;
-  return Math.max(base, Math.min(sel ? 52 : 40, grown));
-}
-function makePlaneIcon(hdg, sel, p) {
-  var type = iconTypeForPilot(p || {});
-  var emergency = String((p && p.transponder) || '') === '7700';
-  var sprite = ICON_SPRITES[type] || ICON_SPRITES.narrow;
-  var maxDim = iconMaxDim(sel);
-  var key = 'png_' + (Math.round(hdg/2)*2) + '_' + (sel?1:0) + '_' + type + '_' + (emergency?1:0) + '_' + Math.round(maxDim);
-  if (IC[key]) return IC[key];
-  var scale = maxDim / Math.max(sprite.w, sprite.h);
-  var dispW = Math.max(10, Math.round(sprite.w * scale));
-  var dispH = Math.max(10, Math.round(sprite.h * scale));
-  var box = Math.max(dispW, dispH) + 6;
-  var sheet = emergency ? 'img/red.png' : (sel ? 'img/selected.png' : 'img/yellow.png');
-  var html = '<div style="width:' + box + 'px;height:' + box + 'px;position:relative;overflow:visible;">'
-    + '<span style="position:absolute;left:50%;top:50%;width:' + dispW + 'px;height:' + dispH + 'px;'
-    + 'background-image:url(' + sheet + ');background-repeat:no-repeat;'
-    + 'background-size:' + Math.round(SPRITE_W * scale) + 'px ' + Math.round(SPRITE_H * scale) + 'px;'
-    + 'background-position:-' + Math.round(sprite.x * scale) + 'px -' + Math.round(sprite.y * scale) + 'px;'
-    + 'transform:translate(-50%,-50%) rotate(' + hdg + 'deg);transform-origin:50% 50%;display:block;"></span></div>';
-  var icon = L.divIcon({
-    className: '',
-    html: html,
-    iconSize: [box, box],
-    iconAnchor: [box / 2, box / 2]
-  });
-  IC[key] = icon;
-  return icon;
-}
-
-var SPRITE_SHEET = 'img/aircrafts-sprite.png';
-var SPRITE_SHEET_W = 1896, SPRITE_SHEET_H = 1454;
-var ICON_SPRITES = {
-  wide:      {x:12,   y:410,  w:292, h:280},
-  narrow:    {x:340,  y:402,  w:268, h:290},
-  regional:  {x:588,  y:718,  w:236, h:250},
-  bizjet:    {x:1338, y:848,  w:180, h:204},
-  turboprop: {x:230,  y:1263, w:134, h:163},
-  fighter:   {x:800,  y:1263, w:124, h:165},
-  heli:      {x:434,  y:1284, w:98,  h:136},
-  glider:    {x:1740, y:1122, w:140, h:58},
-  drone:     {x:1320, y:1262, w:116, h:116}
-};
-function makePlaneIcon(hdg, sel, p) {
-  var type = iconTypeForPilot(p || {});
-  var emergency = String((p && p.transponder) || '') === '7700';
-  var sprite = ICON_SPRITES[type] || ICON_SPRITES.narrow;
-  var maxDim = iconMaxDim(sel);
-  var key = 'mask_' + (Math.round(hdg/2)*2) + '_' + (sel?1:0) + '_' + type + '_' + (emergency?1:0) + '_' + Math.round(maxDim);
-  if (IC[key]) return IC[key];
-  var scale = maxDim / Math.max(sprite.w, sprite.h);
-  var dispW = Math.max(10, Math.round(sprite.w * scale));
-  var dispH = Math.max(10, Math.round(sprite.h * scale));
-  var box = Math.max(dispW, dispH) + 8;
-  var filter = emergency
-    ? 'brightness(0) saturate(100%) invert(17%) sepia(91%) saturate(7467%) hue-rotate(359deg) brightness(103%) contrast(117%)'
-    : (sel
-      ? 'brightness(0) saturate(100%) invert(55%) sepia(88%) saturate(1823%) hue-rotate(356deg) brightness(103%) contrast(102%)'
-      : 'brightness(0) saturate(100%) invert(88%) sepia(74%) saturate(1454%) hue-rotate(338deg) brightness(103%) contrast(103%)');
-  var bgW = Math.round(SPRITE_SHEET_W * scale);
-  var bgH = Math.round(SPRITE_SHEET_H * scale);
-  var bgX = Math.round(sprite.x * scale);
-  var bgY = Math.round(sprite.y * scale);
-  var html = '<div style="width:' + box + 'px;height:' + box + 'px;position:relative;overflow:visible;">'
-    + '<span style="position:absolute;left:50%;top:50%;width:' + dispW + 'px;height:' + dispH + 'px;display:block;'
-    + 'background-image:url(' + SPRITE_SHEET + ');background-repeat:no-repeat;'
-    + 'background-size:' + bgW + 'px ' + bgH + 'px;'
-    + 'background-position:-' + bgX + 'px -' + bgY + 'px;'
-    + 'filter:' + filter + ';'
-    + 'transform:translate(-50%,-50%) rotate(' + hdg + 'deg);transform-origin:50% 50%;display:block;"></span></div>';
-  var icon = L.divIcon({
-    className: '',
-    html: html,
-    iconSize: [box, box],
-    iconAnchor: [box / 2, box / 2]
-  });
-  IC[key] = icon;
-  return icon;
-}
-
-// ─── TRAIL COLOR ──────────────────────────────────────────────────────────────
-// FR24 direction: OLDEST = dark blue/teal, NEWEST = yellow/warm
-// t=0 → oldest (dark navy-blue), t=1 → newest (yellow)
-var CSTOPS = [
-  [0.00, [10,  40, 100]],  // dark navy  — oldest
-  [0.20, [0,   90, 160]],  // deep blue
-  [0.42, [0,  170, 210]],  // cyan-blue
-  [0.65, [0,  210, 160]],  // cyan-green
-  [0.83, [57, 255,  20]],  // bright green
-  [1.00, [255,220,   0]]   // yellow     — newest
+// ─── TRAIL COLOR (altitude-based, AAL) ────────────────────────────────────────
+// Altitude stops in metres (ft * 0.3048). Colors as [R,G,B].
+var ALT_STOPS=[
+  [0,    [255,255,255]],  // <100m
+  [100,  [255,224,98]],
+  [200,  [255,234,0]],
+  [300,  [240,255,0]],
+  [400,  [204,255,0]],
+  [600,  [66,255,0]],
+  [800,  [30,255,0]],
+  [1000, [0,255,12]],
+  [1200, [0,255,54]],
+  [1500, [0,255,114]],
+  [2000, [0,255,156]],
+  [2500, [0,255,210]],
+  [3000, [0,255,228]],
+  [3500, [0,234,255]],
+  [4000, [0,192,255]],
+  [4500, [0,168,255]],
+  [5000, [0,150,255]],
+  [5500, [0,120,255]],
+  [6000, [0,84,255]],
+  [6500, [0,48,255]],
+  [7000, [0,30,255]],
+  [7500, [0,0,255]],
+  [8000, [18,0,255]],
+  [8500, [36,0,255]],
+  [9000, [54,0,255]],
+  [9500, [78,0,255]],
+  [10000,[96,0,255]],
+  [10500,[120,0,255]],
+  [11000,[150,0,255]],
+  [11500,[174,0,255]],
+  [12000,[216,0,255]],
+  [12500,[255,0,228]],
+  [13000,[255,0,0]]
 ];
-function trailCol(t) {
-  var lo = CSTOPS[0], hi = CSTOPS[CSTOPS.length-1];
-  for (var i = 0; i < CSTOPS.length-1; i++) {
-    if (t >= CSTOPS[i][0] && t <= CSTOPS[i+1][0]) { lo=CSTOPS[i]; hi=CSTOPS[i+1]; break; }
+function trailColAlt(altFt){
+  // Convert feet to metres, AAL (subtract arrival airport elevation)
+  var altM=(altFt-gSelectedArrivalElev)*0.3048;
+  if(altM<=0)return'rgb(255,255,255)';
+  if(altM>=13000)return'rgb(255,0,0)';
+  var lo=ALT_STOPS[0],hi=ALT_STOPS[ALT_STOPS.length-1];
+  for(var i=0;i<ALT_STOPS.length-1;i++){
+    if(altM>=ALT_STOPS[i][0]&&altM<=ALT_STOPS[i+1][0]){lo=ALT_STOPS[i];hi=ALT_STOPS[i+1];break;}
   }
-  var f = (t - lo[0]) / (hi[0] - lo[0] || 1);
-  return 'rgb('
-    +Math.round(lo[1][0]+(hi[1][0]-lo[1][0])*f)+','
-    +Math.round(lo[1][1]+(hi[1][1]-lo[1][1])*f)+','
-    +Math.round(lo[1][2]+(hi[1][2]-lo[1][2])*f)+')';
-}
-
-// ─── STATE ────────────────────────────────────────────────────────────────────
-var gMap, gSat, gDark, gOsm;
-var gTrail;           // L.layerGroup for trail
-var gTrailRenderer;
-var gMarkers  = {};
-var gPilots   = new Map();
-var gTrailPts = {};   // callsign -> [[lat,lon], ...] sampled trail points
-var gReckoned = {};   // callsign -> {lat,lon}  — current dead-reckoned pos
-var gMotion   = {};   // callsign -> {from:[lat,lon], to:[lat,lon]}
-var gSamples  = {};   // callsign -> [{lat,lon,t}, ...] real fetched positions
-var gSelected = null;
-var gFetchInt = 5000;
-var gPlaybackDelay = 15000;
-var gFetchId  = null;
-var gAnimId   = null;
-var gLastFetch= 0;
-var gLastFrame= 0;
-var gNT       = null;
-var gFixIconCache = {};
-var gTrailHoverActive = false;
-var gHoveredTrailIndex = -1;
-var gHistoryLoaded = {};
-var gHistoryLoading = {};
-var gHistoryCursor = {};
-var gHistoryQueue = [];
-var gHistoryQueued = {};
-var gActiveHistoryLoads = 0;
-var gMissingFetches = {};
-var gMissingFetchLimit = 6;
-// Adaptive sampling state
-var gPrevHdg     = {};  // callsign -> heading at last sample
-var gPrevSampleT = {};  // callsign -> ms timestamp of last sample
-
-// ─── MAP ──────────────────────────────────────────────────────────────────────
-function initMap() {
-  gMap = L.map('map', {
-    center:[20,0],
-    zoom:3,
-    zoomControl:false,
-    preferCanvas:true,
-    zoomAnimation:true,
-    markerZoomAnimation:false,
-    zoomSnap:0.5,
-    zoomDelta:0.5,
-    wheelPxPerZoomLevel:120,
-    zoomAnimationThreshold:4,
-    fadeAnimation:false
-  });
-  gSat  = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles © Esri',maxZoom:19});
-  gDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OSM © CARTO',subdomains:'abcd',maxZoom:19});
-  gOsm  = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19});
-  gSat.addTo(gMap);
-  gTrailRenderer = L.canvas({padding:0.5});
-  gTrail = L.layerGroup().addTo(gMap);
-  gMap.on('click', function(){ if (gSelected) closePanel(); });
-  gMap.on('zoomend', refreshMarkerIcons);
-  load();
-  gFetchId = setInterval(load, gFetchInt);
-  animLoop();
-}
-
-function refreshMarkerIcons() {
-  Object.keys(gMarkers).forEach(function(cs) {
-    var mk = gMarkers[cs];
-    var p = gPilots.get(cs);
-    if (!mk || !p) return;
-    var sel = cs === gSelected;
-    var hb = Math.round((p.heading || 0) / 2) * 2;
-    mk._hb = hb;
-    mk._sel = sel;
-    mk.setIcon(makePlaneIcon(hb, sel, p));
-  });
-}
-
-function setLayer(t) {
-  [gSat,gDark,gOsm].forEach(function(l){ if(gMap.hasLayer(l)) gMap.removeLayer(l); });
-  document.querySelectorAll('.lb').forEach(function(b){ b.classList.remove('active'); });
-  if(t==='sat'){   gSat.addTo(gMap);  document.getElementById('btn-sat').classList.add('active'); }
-  else if(t==='dark'){ gDark.addTo(gMap); document.getElementById('btn-dark').classList.add('active'); }
-  else {           gOsm.addTo(gMap);  document.getElementById('btn-osm').classList.add('active'); }
-}
-
-// ─── LOAD DATA ────────────────────────────────────────────────────────────────
-function makeTrailFixIcon(color, angle, head, hover) {
-  var key = color + '_' + Math.round(angle) + '_' + (head ? 1 : 0) + '_' + (hover ? 1 : 0);
-  if (gFixIconCache[key]) return gFixIconCache[key];
-  var width = head ? 7 : 6;
-  var height = head ? 4 : 3;
-  var fill = hover || head ? '#ffffff' : color;
-  gFixIconCache[key] = L.divIcon({
-    className: 'trail-fix',
-    iconSize: [width, height],
-    iconAnchor: [width / 2, height / 2],
-    html: '<span style="width:' + width + 'px;height:' + height + 'px;background:' + fill + ';transform:rotate(' + angle + 'deg);transform-origin:50% 50%;"></span>'
-  });
-  return gFixIconCache[key];
-}
-
-async function load() {
-  document.getElementById('refresh-btn').disabled = true;
-  try {
-    var res    = await doFetch();
-    var data   = await res.json();
-    var pilots = data.pilots || [];
-
-    var newMap = new Map();
-    pilots.forEach(function(p){
-      newMap.set(p.callsign, p);
-      gMissingFetches[p.callsign] = 0;
-    });
-
-    // Remove departed
-    Object.keys(gMarkers).forEach(function(cs){
-      if (!newMap.has(cs)) {
-        gMissingFetches[cs] = (gMissingFetches[cs] || 0) + 1;
-        if (gMissingFetches[cs] < gMissingFetchLimit) return;
-        gMap.removeLayer(gMarkers[cs]);
-        delete gMarkers[cs];
-        delete gTrailPts[cs];
-        delete gReckoned[cs];
-        delete gMotion[cs];
-        delete gSamples[cs];
-        delete gHistoryLoaded[cs];
-        delete gHistoryLoading[cs];
-        delete gHistoryCursor[cs];
-        delete gMissingFetches[cs];
-        delete gPrevHdg[cs];
-        delete gPrevSampleT[cs];
-        if (gSelected === cs) closePanel();
-      }
-    });
-
-    // Update / create markers
-    newMap.forEach(function(p, cs){
-      if (!p.latitude && !p.longitude) return;
-      var nextReal = [p.latitude, p.longitude];
-      var sampleTime = Date.now();
-
-      // Push real fix into trail
-      if (!gTrailPts[cs]) gTrailPts[cs] = [];
-      var h = gTrailPts[cs], last = h[h.length-1];
-      if (!last || last[0] !== p.latitude || last[1] !== p.longitude) {
-        h.push([p.latitude, p.longitude]);
-        if (h.length > 600) h.shift();
-      }
-
-      if (!gSamples[cs]) gSamples[cs] = [];
-      var samples = gSamples[cs];
-      var lastSample = samples[samples.length - 1];
-      if (!lastSample || lastSample.lat !== p.latitude || lastSample.lon !== p.longitude) {
-        samples.push({lat: p.latitude, lon: p.longitude, t: sampleTime});
-        if (samples.length > HISTORY_LIMIT) samples.shift();
-      }
-
-      if (!gMarkers[cs]) {
-        var mk = L.marker([p.latitude, p.longitude], {icon: makePlaneIcon(p.heading||0, false, p), zIndexOffset:0});
-        mk._hb = -1; mk._sel = false;
-        mk.bindTooltip(function(){
-          var pp = gPilots.get(cs)||p, fp = pp.flight_plan;
-          return '<b>'+pp.callsign+'</b><br>'
-               + (fp?(fp.aircraft_short||fp.aircraft||'?'):'?')+'<br>'
-               + (fp?(fp.departure||'?')+' → '+(fp.arrival||'?'):'')+'<br>'
-               + 'FL'+('000'+Math.round((pp.altitude||0)/100)).slice(-3)
-               + ' &nbsp;'+(pp.groundspeed||0)+'kts';
-        }, {className:'pt', direction:'top', offset:[0,-4]});
-        mk.on('click', function(e){ L.DomEvent.stopPropagation(e); selectPilot(cs); });
-        mk.addTo(gMap);
-        gMarkers[cs] = mk;
-        gReckoned[cs] = {lat: nextReal[0], lon: nextReal[1]};
-      }
-    });
-
-    gPilots    = newMap;
-    gLastFetch = Date.now();
-    loadStoredHistoryBatch(Array.from(newMap.keys()));
-
-    document.getElementById('sp').textContent          = pilots.length.toLocaleString();
-    document.getElementById('sa').textContent          = (data.controllers||[]).length.toLocaleString();
-    document.getElementById('last-update').textContent = new Date().toUTCString().slice(5,25)+' UTC';
-
-    if (gSelected) {
-      var sp = gPilots.get(gSelected);
-      if (sp) {
-        fillPanel(sp);
-        loadStoredHistory(gSelected);
-        redrawTrail();
-      }
-    }
-    document.getElementById('loading').style.display = 'none';
-    showNotif('✓ ' + pilots.length + ' aircraft loaded');
-  } catch(e) {
-    document.getElementById('loading').style.display = 'none';
-    showNotif('⚠ VATSIM unreachable — retrying in 5s');
-    console.error(e);
-  }
-  document.getElementById('refresh-btn').disabled = false;
-}
-
-// ─── ANIMATION LOOP ───────────────────────────────────────────────────────────
-// • 60fps dead-reckoning for all aircraft — always moving
-// • Adaptive trail sampling for selected aircraft:
-//     Straight (turn-rate < 1.5 °/s) → sample every 12s → sparse dashes
-//     Turning  (turn-rate ≥ 1.5 °/s) → sample every 2s  → dense curve
-// • Trail only redrawn when a new point is added (not every frame)
-function animLoop() {
-  function frame() {
-    var nowMs = Date.now();
-    var dtMs = gLastFrame ? (nowMs - gLastFrame) : 16;
-    gLastFrame = nowMs;
-
-    // --- Move all aircraft ---
-    gPilots.forEach(function(p, cs) {
-      var mk = gMarkers[cs];
-      if (!mk) return;
-      var pos = [p.latitude, p.longitude];
-      var displayedTrail = getDisplayedTrail(cs, nowMs);
-      if (displayedTrail.length) {
-        pos = displayedTrail[displayedTrail.length - 1];
-      }
-      gReckoned[cs] = {lat: pos[0], lon: pos[1]};
-      mk.setLatLng(pos);
-      // Update icon only on heading bucket or selection change
-      var sel = cs === gSelected;
-      var hb  = Math.round((p.heading||0) / 2) * 2;
-      if (mk._hb !== hb || mk._sel !== sel) {
-        mk._hb = hb; mk._sel = sel;
-        mk.setIcon(makePlaneIcon(hb, sel, p));
-        mk.setZIndexOffset(sel ? 1000 : 0);
-      }
-    });
-
-    // --- Selected aircraft live head update ---
-    if (gSelected) {
-      var p = gPilots.get(gSelected);
-      var r = gReckoned[gSelected];
-      if (p && r) {
-        var prevT = gPrevSampleT[gSelected] || 0;
-
-        // Turn rate °/s over last sample interval
-        if (!gTrailHoverActive && nowMs - prevT >= 250) {
-          gPrevSampleT[gSelected] = nowMs;
-          redrawTrail();
-        }
-        // Live lat/lon in panel
-        document.getElementById('p-lat').textContent = r.lat.toFixed(4);
-        document.getElementById('p-lon').textContent = r.lon.toFixed(4);
-      }
-    }
-
-    // Countdown bar
-    var pct = Math.min(1, (nowMs - gLastFetch) / gFetchInt);
-    document.getElementById('cbar').style.width = (100 - pct*100) + '%';
-
-    gAnimId = requestAnimationFrame(frame);
-  }
-  gAnimId = requestAnimationFrame(frame);
+  var f=(altM-lo[0])/(hi[0]-lo[0]||1);
+  return'rgb('+Math.round(lo[1][0]+(hi[1][0]-lo[1][0])*f)+','+Math.round(lo[1][1]+(hi[1][1]-lo[1][1])*f)+','+Math.round(lo[1][2]+(hi[1][2]-lo[1][2])*f)+')';
 }
 
 // ─── TRAIL DRAW ───────────────────────────────────────────────────────────────
-// Replicates FR24's trail exactly:
-// • A semi-transparent polyline connecting all points (the faint backbone)
-// • Square/rectangular dashes along that line, coloured by age
-//   oldest = dark navy-blue, newest = yellow
-// We achieve "square dashes" by drawing short thick polyline SEGMENTS
-// between consecutive points, alternating filled/gap using dashArray.
-// Each segment gets its own colour from the gradient.
-function redrawTrailLegacyUnused() {
-  gTrail.clearLayers();
-  if (!gSelected) return;
-  var pts = gTrailPts[gSelected];
-  if (!pts || pts.length < 2) return;
-  var n = pts.length;
+var gTrailPxCache=[];
+var gHoveredDot=-1;
+var MAX_GAP_MS = 5 * 60 * 1000; // gaps > 5 min = missing data, don't connect
 
-  for (var i = 0; i < n-1; i++) {
-    var t0  = i     / (n-1);  // age of this segment's start point (0=oldest,1=newest)
-    var t1  = (i+1) / (n-1);
-    var tc  = (t0 + t1) / 2;  // midpoint colour
-    var col = trailCol(tc);
+// Chaikin subdivision in geo-space: repeatedly cuts corners by replacing each
+// segment with two points at 25% and 75% along it. Produces smooth arcs with
+// zero overshoot regardless of point spacing. Preserves first and last points.
+function chaikinSmooth(pts, passes) {
+  for(var p=0; p<passes; p++){
+    var out=[pts[0]];
+    for(var i=0; i<pts.length-1; i++){
+      var a=pts[i], b=pts[i+1];
+      out.push({
+        lat: a.lat*0.75 + b.lat*0.25,
+        lon: a.lon*0.75 + b.lon*0.25,
+        alt: a.alt*0.75 + b.alt*0.25,
+        t:   a.t
+      });
+      out.push({
+        lat: a.lat*0.25 + b.lat*0.75,
+        lon: a.lon*0.25 + b.lon*0.75,
+        alt: a.alt*0.25 + b.alt*0.75,
+        t:   b.t
+      });
+    }
+    out.push(pts[pts.length-1]);
+    pts=out;
+  }
+  return pts;
+}
 
-    // Segment drawn as a short dashed polyline:
-    // dashArray "5 3" = 5px dash, 3px gap  → rectangular dashes like FR24
-    L.polyline([pts[i], pts[i+1]], {
-      color:       col,
-      weight:      3,          // 3px wide — same as FR24 trail thickness
-      opacity:     0.85,
-      lineCap:     'square',   // square ends = rectangular dashes
-      lineJoin:    'miter',
-      dashArray:   '5 3',      // dash 5px, gap 3px
-      interactive: false,
-      smoothFactor: 0
-    }).addTo(gTrail);
+function drawTrailCanvas(){
+  var ctx=gTrailCtx;
+  ctx.clearRect(0,0,gTrailCanvas.width,gTrailCanvas.height);
+  gTrailPxCache=[];
+  if(!gSelected||!gMap) return;
+  var nowMs=Date.now();
+  var p=gPilots.get(gSelected);
+  var trail=getTrail(gSelected);
+  // Append lagged dead-reckoned position as trail tip
+  if(p){
+    var dr=getDeadReckonedPos(p,nowMs);
+    var tipT=nowMs-PLAYBACK_LAG_MS;
+    trail=trail.concat([[dr.lat,dr.lon,dr.alt,tipT]]);
+  }
+  if(trail.length<2) return;
+
+  // Build contiguous segments (break on time gaps > 5 min)
+  var rawSegs=[], seg=[];
+  for(var i=0;i<trail.length;i++){
+    if(i>0){
+      var tA=trail[i-1][3], tB=trail[i][3];
+      if(tA&&tB&&(tB-tA)>MAX_GAP_MS){if(seg.length)rawSegs.push(seg);seg=[];}
+    }
+    seg.push({lat:trail[i][0],lon:trail[i][1],alt:trail[i][2],t:trail[i][3]});
+  }
+  if(seg.length) rawSegs.push(seg);
+
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=3; ctx.globalAlpha=0.5;
+  var hoverCache=[];
+
+  var STRAIGHT_THRESHOLD = 5; // degrees — below this = straight, no smoothing needed
+
+  for(var s=0;s<rawSegs.length;s++){
+    var raw=rawSegs[s];
+    if(raw.length<2) continue;
+
+    // Compute bearing change at each interior point
+    function geoBearing(a, b){
+      var dLon=(b.lon-a.lon)*D2R, la=a.lat*D2R, lb=b.lat*D2R;
+      return (Math.atan2(Math.sin(dLon)*Math.cos(lb), Math.cos(la)*Math.sin(lb)-Math.sin(la)*Math.cos(lb)*Math.cos(dLon))/D2R+360)%360;
+    }
+    function bearingDiff(a, b){
+      var d=Math.abs(a-b)%360; return d>180?360-d:d;
+    }
+
+    // Mark each point as "turning" if bearing change to/from it exceeds threshold
+    var isTurning=new Array(raw.length).fill(false);
+    for(var i=1;i<raw.length-1;i++){
+      var bIn=geoBearing(raw[i-1],raw[i]);
+      var bOut=geoBearing(raw[i],raw[i+1]);
+      if(bearingDiff(bIn,bOut)>STRAIGHT_THRESHOLD){
+        // Mark this point and its neighbors so the spline has context
+        isTurning[i-1]=true; isTurning[i]=true; isTurning[i+1]=true;
+      }
+    }
+
+    // Split into sub-runs: turning runs get Chaikin, straight runs draw as-is
+    var i=0;
+    while(i<raw.length-1){
+      // Collect a contiguous run of the same type starting at i
+      var turning=isTurning[i];
+      var run=[raw[i]];
+      var j=i+1;
+      while(j<raw.length && isTurning[j]===turning){ run.push(raw[j]); j++; }
+      // Include the last point of the run as start of next to avoid gaps
+      if(j<raw.length) run.push(raw[j]);
+
+      var smooth = (turning && run.length>=3) ? chaikinSmooth(run, 2) : run;
+      var px=smooth.map(function(pt){ return gMap.project([pt.lon,pt.lat]); });
+
+      for(var k=0;k<smooth.length-1;k++){
+        ctx.beginPath();
+        ctx.moveTo(px[k].x, px[k].y);
+        ctx.lineTo(px[k+1].x, px[k+1].y);
+        ctx.strokeStyle=trailColAlt((smooth[k].alt+smooth[k+1].alt)/2);
+        ctx.stroke();
+        if(k===0) hoverCache.push({x:px[k].x, y:px[k].y, alt:smooth[k].alt});
+        hoverCache.push({x:px[k+1].x, y:px[k+1].y, alt:smooth[k+1].alt});
+      }
+
+      i=j;
+    }
   }
 
-  // Endpoint dot at current position (the bright head of the trail)
-  var cur = pts[pts.length-1];
-  L.circleMarker(cur, {
-    radius:      5,
-    color:       '#fff',
-    weight:      1.5,
-    fillColor:   trailCol(1),
-    fillOpacity: 1,
-    interactive: false
-  }).addTo(gTrail);
+  // Store full rendered point list for hover hit-testing
+  gTrailPxCache = hoverCache;
+
+  // Draw all rendered points (fix + interpolated) as uniform dots
+  ctx.globalAlpha=1;
+  for(var j=0;j<hoverCache.length;j++){
+    var hp=hoverCache[j];
+    ctx.beginPath(); ctx.arc(hp.x,hp.y,1.5,0,Math.PI*2);
+    ctx.fillStyle=trailColAlt(hp.alt);
+    ctx.fill();
+  }
+  // Hover highlight
+  if(gHoveredDot>=0 && hoverCache[gHoveredDot]){
+    var hp=hoverCache[gHoveredDot];
+    ctx.beginPath(); ctx.arc(hp.x,hp.y,2.2,0,Math.PI*2);
+    ctx.fillStyle='#ffffff';
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+// Trail hover — show altitude tooltip on hovered spline point
+function onTrailMouseMove(mx,my){
+  if(!gSelected||!gTrailPxCache.length){
+    if(gHoveredDot!==-1){gHoveredDot=-1;drawTrailCanvas();hideTip();}
+    return;
+  }
+  var hit=-1, hitR=100; // 10px radius
+  for(var i=0;i<gTrailPxCache.length;i++){
+    var dx=gTrailPxCache[i].x-mx, dy=gTrailPxCache[i].y-my, d2=dx*dx+dy*dy;
+    if(d2<hitR){hit=i;hitR=d2;}
+  }
+  if(hit!==gHoveredDot){
+    gHoveredDot=hit;
+    drawTrailCanvas();
+    if(hit>=0){
+      var pt=gTrailPxCache[hit];
+      var altFt=Math.round(pt.alt||0);
+      var fl=Math.round(altFt/100);
+      var altStr=fl>0?'FL'+(' 000'+fl).slice(-3):(altFt+' ft');
+      gTooltip.innerHTML=altStr;
+      gTooltip.style.display='block';
+      gTooltip.style.left=(mx+14)+'px';
+      gTooltip.style.top=(my-8)+'px';
+    } else {
+      hideTip();
+    }
+  }
+}
+
+// ─── MARKERS ──────────────────────────────────────────────────────────────────
+var gMarkers={};
+var gTooltip=document.getElementById('tooltip');
+
+function showTip(lngLat, p){
+  var probe=document.createElement('div');
+  probe.style.cssText='position:fixed;visibility:hidden;top:-9999px;font-family:Open Sans,sans-serif;font-size:12px;font-weight:600;padding:4px 9px;white-space:nowrap;letter-spacing:.2px';
+  probe.textContent=p.callsign;
+  document.body.appendChild(probe);
+  var w=probe.offsetWidth;
+  var h=probe.offsetHeight;
+  document.body.removeChild(probe);
+
+  var arrowH=6;
+  var arrowInset=1;
+  var aw=5;
+  var r=4;
+  var totalH=h+arrowH;
+  var cx=w/2;
+  var path='M '+r+' 0'
+      +' L '+(w-r)+' 0'
+      +' A '+r+' '+r+' 0 0 1 '+w+' '+r
+      +' L '+w+' '+(h-r)
+      +' A '+r+' '+r+' 0 0 1 '+(w-r)+' '+h
+      +' L '+(cx+aw)+' '+h
+      +' L '+cx+' '+(h+arrowH-arrowInset)
+      +' L '+(cx-aw)+' '+h
+      +' L '+r+' '+h
+      +' A '+r+' '+r+' 0 0 1 0 '+(h-r)
+      +' L 0 '+r
+      +' A '+r+' '+r+' 0 0 1 '+r+' 0'
+      +' Z';
+  gTooltip.style.display='block';
+  gTooltip.style.width=w+'px';
+  gTooltip.style.height=totalH+'px';
+  gTooltip.innerHTML=
+    '<svg viewBox="0 0 '+w+' '+totalH+'" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:'+w+'px;height:'+totalH+'px">'
+    +'<path d="'+path+'" fill="white"/>'
+    +'</svg>'
+    +'<div class="tt-inner" style="height:'+h+'px">'+p.callsign+'</div>';  gTooltip._lngLat=lngLat;
+  updateTipPos();
+}
+function updateTipPos(){
+  if(!gTooltip._lngLat||gTooltip.style.display==='none') return;
+  var pos=gMap.project(gTooltip._lngLat);
+  var w=parseFloat(gTooltip.style.width)||0;
+  var h=parseFloat(gTooltip.style.height)||0;
+  gTooltip.style.left=(pos.x-w/2)+'px';
+  gTooltip.style.top=(pos.y-h-10)+'px';
+}
+function hideTip(){gTooltip.style.display='none';}
+
+function getMarkerPos(cs, p, nowMs){
+  var pos=getDeadReckonedPos(p, nowMs);
+  return [pos.lon, pos.lat, pos.hdg];
+}
+
+function upsertMarker(cs, p){
+  var nowMs=Date.now();
+  var pos=getMarkerPos(cs,p,nowMs);
+  var sel=(cs===gSelected);
+  var hdg=Math.round(pos[2]/2)*2;
+  // If fixes were just cleared (selection), the heading may snap to raw p.heading.
+  // Prefer the last rendered heading to avoid a jarring rotation jump.
+  if(gMarkers[cs] && sel && gFixes[cs] && gFixes[cs].length === 0){
+    hdg = gMarkers[cs].lastHdg !== undefined ? gMarkers[cs].lastHdg : hdg;
+  }
+  if(gMarkers[cs]){
+    gMarkers[cs].marker.setLngLat([pos[0],pos[1]]);
+    gMarkers[cs].el.innerHTML=makePlaneHTML(hdg,sel,p);
+    gMarkers[cs].lastHdg=hdg;
+  } else {
+    var el=document.createElement('div');
+    el.innerHTML=makePlaneHTML(hdg,sel,p);
+    el.style.cssText='cursor:pointer;display:block';
+    el.addEventListener('mouseenter',function(){
+      showTip(mk.getLngLat(), gPilots.get(cs)||p);
+    });
+    el.addEventListener('mouseleave',hideTip);
+    el.addEventListener('click',function(e){e.stopPropagation();gMarkerClickFlag=true;selectPilot(cs);});
+    var mk=new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([pos[0],pos[1]]).addTo(gMap);
+    gMarkers[cs]={marker:mk,el:el,lastHdg:hdg};
+  }
+}
+function removeMarker(cs){if(gMarkers[cs]){gMarkers[cs].marker.remove();delete gMarkers[cs];}}
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+var gMap=null;
+var gPilots=new Map();
+var gSelected=null;
+var gFetchInt=5000, gFetchId=null, gAnimId=null, gLastFetch=0, gNT=null;
+var gMissingFetches={}, gMissingFetchLimit=6;
+var gMarkerClickFlag=false;
+var gHistoryLoaded={}, gHistoryLoading={};
+var gTrailCanvas=document.getElementById('trail-canvas');
+var gTrailCtx=gTrailCanvas.getContext('2d');
+
+function resizeTrailCanvas(){gTrailCanvas.width=window.innerWidth;gTrailCanvas.height=window.innerHeight;}
+resizeTrailCanvas();
+window.addEventListener('resize',function(){resizeTrailCanvas();drawTrailCanvas();});
+
+var gInitialLoadDone=false;
+// ─── LOAD ─────────────────────────────────────────────────────────────────────
+async function load(){
+  var rbtn=document.getElementById('refresh-btn'); if(rbtn) rbtn.disabled=true;
+  try{
+    var res=await doFetch(), data=await res.json(), pilots=data.pilots||[];
+    var nowMs=Date.now();
+    var newMap=new Map();
+    pilots.forEach(function(p){newMap.set(p.callsign,p);gMissingFetches[p.callsign]=0;});
+
+    // Remove gone planes
+    Object.keys(gMarkers).forEach(function(cs){
+      if(!newMap.has(cs)){
+        gMissingFetches[cs]=(gMissingFetches[cs]||0)+1;
+        if(gMissingFetches[cs]<gMissingFetchLimit) return;
+        removeMarker(cs);
+        delete gFixes[cs]; delete gHistoryLoaded[cs]; delete gHistoryLoading[cs];
+        delete gMissingFetches[cs];
+        if(gSelected===cs) closePanel();
+      }
+    });
+
+    // If first load, wait for DB history AND then wait 20s for live data buffer
+    if(!gInitialLoadDone) {
+      await loadAllHistoryBatch(Array.from(newMap.keys()));
+      
+      // Record first snapshot of live data
+      newMap.forEach(function(p,cs){ if(p.latitude&&p.longitude) pushFix(cs, p, nowMs); });
+
+      document.getElementById('lt').textContent = 'GATHERING LIVE DATA...';
+      var lp = document.getElementById('lp');
+      lp.style.display = 'block';
+      
+      // Wait 20 seconds to get the "future" data segment
+      for(var s=20; s>0; s--) {
+        lp.textContent = 'READY IN ' + s + 's';
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      
+      // Fetch second snapshot to establish the "future" path
+      var res2=await doFetch(), data2=await res2.json();
+      var nowMs2=Date.now();
+      (data2.pilots||[]).forEach(function(p){ if(p.latitude&&p.longitude) pushFix(p.callsign, p, nowMs2); });
+      
+      gInitialLoadDone=true;
+    }
+
+    // Normal refresh cycle
+    newMap.forEach(function(p,cs){
+      if(!p.latitude&&!p.longitude) return;
+      pushFix(cs, p, nowMs);
+      upsertMarker(cs, p);
+    });
+
+    gPilots=newMap;
+    gLastFetch=nowMs;
+    document.getElementById('sp') && (document.getElementById('sp').textContent=pilots.length.toLocaleString());
+    document.getElementById('sa') && (document.getElementById('sa').textContent=(data.controllers||[]).length.toLocaleString());
+    // last-update display removed (UTC clock in navbar)
+    if(gSelected){var sp=gPilots.get(gSelected);if(sp)fillPanel(sp);}
+    
+    document.getElementById('loading').style.display='none';
+    showNotif('✓ '+pilots.length+' aircraft synchronized');
+  }catch(e){
+    document.getElementById('loading').style.display='none';
+    showNotif('⚠ VATSIM unreachable — retrying');console.error(e);
+  }
+  if(rbtn) rbtn.disabled=false;
+}
+
+// ─── ANIMATION LOOP ───────────────────────────────────────────────────────────
+function animLoop(){
+  function frame(){
+    var nowMs=Date.now();
+    var pct=Math.min(1,(nowMs-gLastFetch)/gFetchInt);
+    var _cbar=document.getElementById('cbar'); if(_cbar) _cbar.style.width=(100-pct*100)+'%';
+
+    // Move every marker to dead-reckoned position
+    gPilots.forEach(function(p,cs){
+      if(!gMarkers[cs]) return;
+      var pos=getMarkerPos(cs,p,nowMs);
+      gMarkers[cs].marker.setLngLat([pos[0],pos[1]]);
+      var hdg=Math.round(pos[2]/2)*2;
+      if(gMarkers[cs].lastHdg!==hdg||gMarkers[cs].lastSel!==(cs===gSelected)){
+        gMarkers[cs].lastHdg=hdg;
+        gMarkers[cs].lastSel=(cs===gSelected);
+        gMarkers[cs].el.innerHTML=makePlaneHTML(hdg,cs===gSelected,p);
+      }
+    });
+
+    // Redraw trail and update panel coords for selected plane
+    if(gSelected){
+      var sp=gPilots.get(gSelected);
+      if(sp){
+        var dr=getDeadReckonedPos(sp,nowMs);
+        document.getElementById('p-lat').textContent=dr.lat.toFixed(4);
+        document.getElementById('p-lon').textContent=dr.lon.toFixed(4);
+      }
+      drawTrailCanvas();
+    }
+    gAnimId=requestAnimationFrame(frame);
+  }
+  gAnimId=requestAnimationFrame(frame);
 }
 
 // ─── SELECT / PANEL ───────────────────────────────────────────────────────────
-function redrawTrail() {
-  gTrail.clearLayers();
-  if (!gSelected) return;
-  var pts = getDisplayedTrail(gSelected, Date.now());
-  if (!pts || !pts.length) return;
-  var hoverRadius = hoverRadiusForZoom();
-  var linePts = buildLinePath(pts, gMap ? gMap.getZoom() : 10);
-  var ln = linePts.length;
-
-  for (var i = 0; i < ln - 1; i++) {
-    var t0 = i / (ln - 1);
-    var t1 = (i + 1) / (ln - 1);
-    var col = trailCol((t0 + t1) / 2);
-    L.polyline([linePts[i], linePts[i + 1]], {
-      color: col,
-      weight: 3,
-      opacity: 0.46,
-      lineCap: 'butt',
-      lineJoin: 'round',
-      interactive: false,
-      smoothFactor: 0,
-      renderer: gTrailRenderer
-    }).addTo(gTrail);
-  }
-
-  for (var j = 0; j < ln; j++) {
-    var t = j / (ln - 1);
-    var fixColor = trailCol(t);
-    var fix = L.circleMarker(linePts[j], {
-      radius: 1.5,
-      stroke: false,
-      fillColor: gHoveredTrailIndex === j ? '#ffffff' : fixColor,
-      fillOpacity: gHoveredTrailIndex === j ? 1 : 0.82,
-      interactive: false,
-      renderer: gTrailRenderer
-    }).addTo(gTrail);
-    var hoverTarget = L.circleMarker(linePts[j], {
-      radius: hoverRadius,
-      stroke: false,
-      fillOpacity: 0,
-      interactive: true,
-      bubblingMouseEvents: false,
-      className: 'trail-hover-target',
-      renderer: gTrailRenderer
-    }).addTo(gTrail);
-    (function(marker, target, color, idx){
-      target.on('mouseover', function() {
-        gTrailHoverActive = true;
-        gHoveredTrailIndex = idx;
-        gMap.getContainer().style.setProperty('cursor', 'pointer', 'important');
-        marker.setStyle({ fillColor: '#ffffff' });
-      });
-      target.on('mousemove', function() {
-        gTrailHoverActive = true;
-        gHoveredTrailIndex = idx;
-        gMap.getContainer().style.setProperty('cursor', 'pointer', 'important');
-      });
-      target.on('mouseout', function() {
-        gTrailHoverActive = false;
-        if (gHoveredTrailIndex === idx) gHoveredTrailIndex = -1;
-        gMap.getContainer().style.removeProperty('cursor');
-        marker.setStyle({ fillColor: color });
-      });
-    })(fix, hoverTarget, fixColor, j);
-  }
-}
-
-function selectPilot(cs) {
-  if (gSelected && gMarkers[gSelected]) {
-    var op = gPilots.get(gSelected);
-    if (op) { gMarkers[gSelected].setIcon(makePlaneIcon(Math.round((op.heading||0)/2)*2, false, op)); gMarkers[gSelected]._sel = false; }
-  }
-  gSelected = cs;
-  var p = gPilots.get(cs); if (!p) return;
-  var r = gReckoned[cs];
-  gPrevSampleT[cs] = 0;
-  gMarkers[cs].setIcon(makePlaneIcon(Math.round((p.heading||0)/2)*2, true, p));
-  gMarkers[cs]._sel = true;
-  fillPanel(p);
+async function selectPilot(cs){
+  hideTip();
+  if(gSelected&&gMarkers[gSelected]){var op=gPilots.get(gSelected);if(op)upsertMarker(gSelected,op);}
+  gSelected=cs;
+  var p=gPilots.get(cs); if(!p) return;
+  
+  // Show initialization state
+  document.getElementById('p-loader').style.display='flex';
   document.getElementById('panel').classList.add('open');
-  loadStoredHistory(cs);
-  redrawTrail();
-  gMap.panTo(r ? [r.lat, r.lon] : [p.latitude, p.longitude], {animate:true, duration:.4});
+  
+  delete gFixes[cs]; // Clear and start fresh
+  gHistoryLoaded[cs]=false;
+  updateSelectedArrivalElev(p);
+  
+  // Wait for history points from database
+  await loadStoredHistory(cs);
+  
+  // Now that points are present, finalize initialization
+  document.getElementById('p-loader').style.display='none';
+  upsertMarker(cs,p);
+  fillPanel(p);
+  drawTrailCanvas();
+  
+  // Pan to aircraft
+  gMap.easeTo({center:[p.longitude,p.latitude],duration:400});
 }
-
-function fillPanel(p) {
-  var fp = p.flight_plan;
-  document.getElementById('p-cs').textContent  = p.callsign;
-  document.getElementById('p-ac').textContent  = (fp&&(fp.aircraft_short||fp.aircraft))||'Unknown Aircraft';
-  document.getElementById('p-dep').textContent = (fp&&fp.departure)||'—';
-  document.getElementById('p-arr').textContent = (fp&&fp.arrival)||'—';
-  var fl = Math.round((p.altitude||0)/100);
-  document.getElementById('p-alt').textContent = fl > 0 ? 'FL'+('000'+fl).slice(-3) : ((p.altitude||0)+' ft');
-  document.getElementById('p-spd').innerHTML   = (p.groundspeed||0)+'<span class="su">kts</span>';
-  document.getElementById('p-hdg').innerHTML   = (p.heading||0)+'<span class="su">°</span>';
-  document.getElementById('p-sqk').textContent = p.transponder||'—';
-  document.getElementById('p-lat').textContent = p.latitude  ? p.latitude.toFixed(4)  : '—';
-  document.getElementById('p-lon').textContent = p.longitude ? p.longitude.toFixed(4) : '—';
-  document.getElementById('p-rt').textContent  = (fp&&fp.route)||'No route filed';
+function fillPanel(p){
+  var fp=p.flight_plan;
+  document.getElementById('p-cs').textContent=p.callsign;
+  document.getElementById('p-ac').textContent=(fp&&(fp.aircraft_short||fp.aircraft))||'Unknown Aircraft';
+  document.getElementById('p-dep').textContent=(fp&&fp.departure)||'—';
+  document.getElementById('p-arr').textContent=(fp&&fp.arrival)||'—';
+  var fl=Math.round((p.altitude||0)/100);
+  document.getElementById('p-alt').textContent=fl>0?'FL'+('000'+fl).slice(-3):((p.altitude||0)+' ft');
+  document.getElementById('p-spd').innerHTML=(p.groundspeed||0)+'<span class="su">kts</span>';
+  document.getElementById('p-hdg').innerHTML=(p.heading||0)+'<span class="su">°</span>';
+  document.getElementById('p-sqk').textContent=p.transponder||'—';
+  document.getElementById('p-lat').textContent=p.latitude?p.latitude.toFixed(4):'—';
+  document.getElementById('p-lon').textContent=p.longitude?p.longitude.toFixed(4):'—';
+  document.getElementById('p-rt').textContent=(fp&&fp.route)||'No route filed';
 }
-
-function closePanel() {
-  if (gSelected && gMarkers[gSelected]) {
-    var p = gPilots.get(gSelected);
-    if (p) { gMarkers[gSelected].setIcon(makePlaneIcon(Math.round((p.heading||0)/2)*2,false, p)); gMarkers[gSelected]._sel=false; }
-  }
-  gSelected = null;
-  gTrailHoverActive = false;
-  gHoveredTrailIndex = -1;
+function closePanel(){
+  if(gSelected&&gMarkers[gSelected]){var p=gPilots.get(gSelected);if(p)upsertMarker(gSelected,p);}
+  gSelected=null;
+  gSelectedArrivalElev=0;
   document.getElementById('panel').classList.remove('open');
-  gTrail.clearLayers();
+  drawTrailCanvas();
 }
+
+// ─── MAP ──────────────────────────────────────────────────────────────────────
+async function initMap(){
+  gMap=new maplibregl.Map({
+    container:'map',
+    style:{
+      version:8,
+      glyphs:'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+      sources:{tiles:{type:'raster',tiles:[TILE_URLS.sat],tileSize:256,attribution:'Tiles © Esri'}},
+      layers:[{id:'bg',type:'background',paint:{'background-color':'#000'}},{id:'tiles',type:'raster',source:'tiles',paint:{'raster-fade-duration':0}}]
+    },
+    center:[0,20],zoom:2,minZoom:1,maxZoom:18,
+    attributionControl:false,dragRotate:false,
+    scrollZoom:{speed:0.15,smooth:true}
+  });
+  gMap.touchZoomRotate&&gMap.touchZoomRotate.disableRotation();
+  gMap.on('render',drawTrailCanvas);
+  gMap.on('render',updateTipPos);
+  gMap.on('zoom',updateTipPos);
+  gMap.on('move',updateTipPos);
+  gMap.on('mousemove',function(e){onTrailMouseMove(e.point.x,e.point.y);});
+  gMap.on('mouseout',function(){if(gHoveredDot!==-1){gHoveredDot=-1;drawTrailCanvas();}});
+  gMap.on('click',function(e){if(gMarkerClickFlag){gMarkerClickFlag=false;return;}if(gSelected)closePanel();});
+  gMap.getCanvas().style.cursor='pointer';
+  await load();
+  gFetchId=setInterval(load,gFetchInt);
+  animLoop();
+}
+
+// ─── LAYER SWITCH ─────────────────────────────────────────────────────────────
+function setLayer(t){
+  document.querySelectorAll('.lb').forEach(function(b){b.classList.remove('active');});
+  document.getElementById('btn-'+t).classList.add('active');
+  if(!gMap) return;
+  gMap.getSource('tiles').setTiles([TILE_URLS[t]]);
+}
+
+// ─── UTC CLOCK ────────────────────────────────────────────────────────────────
+function updateClock(){
+  var now=new Date();
+  var h=('0'+now.getUTCHours()).slice(-2);
+  var m=('0'+now.getUTCMinutes()).slice(-2);
+  document.querySelector('#nav-utc .utc-time').textContent=h+':'+m;
+}
+updateClock();
+setInterval(updateClock,10000);
+
+// ─── SEARCH HISTORY ───────────────────────────────────────────────────────────
+var gSearchHistory=JSON.parse(localStorage.getItem('vsearch')||'[]');
+function saveHistory(q){
+  gSearchHistory=gSearchHistory.filter(function(x){return x!==q;});
+  gSearchHistory.unshift(q);
+  if(gSearchHistory.length>8)gSearchHistory=gSearchHistory.slice(0,8);
+  localStorage.setItem('vsearch',JSON.stringify(gSearchHistory));
+}
+function renderHistory(){
+  var list=document.getElementById('search-history-list');
+  list.innerHTML='';
+  var items=gSearchHistory.slice(0,5);
+  items.forEach(function(q){
+    var d=document.createElement('div');
+    d.className='sdrop-item';
+    d.innerHTML='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'+q;
+    d.addEventListener('mousedown',function(e){e.preventDefault();document.getElementById('si').value=q;hideDropdown();doSearch();});
+    list.appendChild(d);
+  });
+}
+function showDropdown(){renderHistory();document.getElementById('search-dropdown').classList.add('open');}
+function hideDropdown(){document.getElementById('search-dropdown').classList.remove('open');}
+var _siEl=document.getElementById('si');
+var _kbdEl=document.querySelector('.search-kbd');
+_siEl.addEventListener('focus',function(){showDropdown();if(_kbdEl)_kbdEl.style.display='none';});
+_siEl.addEventListener('blur',function(){setTimeout(hideDropdown,150);if(_kbdEl)_kbdEl.style.display='';});
+document.getElementById('clear-history-btn').addEventListener('click',function(){gSearchHistory=[];localStorage.removeItem('vsearch');renderHistory();});
+document.addEventListener('keydown',function(e){if(e.key==='/'&&document.activeElement!==_siEl){e.preventDefault();_siEl.focus();}});
 
 // ─── SEARCH ───────────────────────────────────────────────────────────────────
-function doSearch() {
-  var q = document.getElementById('si').value.trim().toUpperCase(); if (!q) return;
-  var hit = gPilots.get(q);
-  if (!hit) gPilots.forEach(function(p,cs){ if(!hit && cs.indexOf(q)!==-1) hit=p; });
-  if (hit) { gMap.setView([hit.latitude, hit.longitude], 9, {animate:true}); selectPilot(hit.callsign); }
-  else showNotif('⚠ Not found: '+q);
+function doSearch(){
+  var q=document.getElementById('si').value.trim().toUpperCase(); if(!q) return;
+  saveHistory(q);
+  var hit=gPilots.get(q);
+  if(!hit) gPilots.forEach(function(p,cs){if(!hit&&cs.indexOf(q)!==-1)hit=p;});
+  if(hit){
+    gMap.easeTo({center:[hit.longitude,hit.latitude],zoom:9,duration:600});
+    selectPilot(hit.callsign);
+  } else showNotif('⚠ Not found: '+q);
 }
-document.getElementById('si').addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
-
-function showNotif(m) {
-  var el = document.getElementById('notif');
-  el.textContent = m; el.classList.add('show');
-  clearTimeout(gNT);
-  gNT = setTimeout(function(){ el.classList.remove('show'); }, 3500);
-}
-function doRefresh() {
-  clearInterval(gFetchId);
-  load();
-  gFetchId = setInterval(load, gFetchInt);
-}
+document.getElementById('si').addEventListener('keydown',function(e){if(e.key==='Enter'){hideDropdown();doSearch();}});
+function showNotif(m){var el=document.getElementById('notif');el.textContent=m;el.classList.add('show');clearTimeout(gNT);gNT=setTimeout(function(){el.classList.remove('show');},3500);}
+function doRefresh(){clearInterval(gFetchId);load();gFetchId=setInterval(load,gFetchInt);}
 
 initMap();
+
 </script>
+
 </body>
 </html>

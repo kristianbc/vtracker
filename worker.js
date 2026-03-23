@@ -59,6 +59,11 @@ function normalizePilotRows(pilots, observedAt) {
   return rows;
 }
 
+function isLocalRequest(request) {
+  const hostname = new URL(request.url).hostname;
+  return hostname === "127.0.0.1" || hostname === "localhost";
+}
+
 async function persistLatestPositions(db, rows) {
   if (!db || !rows.length) return;
   const stmt = db.prepare(
@@ -107,7 +112,7 @@ async function persistTrajectoryPoints(db, rows) {
   }
 }
 
-async function handleVatsim(env, ctx) {
+async function handleVatsim(request, env, ctx) {
   const sourceUrl = env.VATSIM_URL || VATSIM_URL;
   let upstream;
 
@@ -128,17 +133,15 @@ async function handleVatsim(env, ctx) {
   const pilots = Array.isArray(data.pilots) ? data.pilots : [];
   const observedAt = Date.parse((data.general && data.general.update_timestamp) || "") || Date.now();
   const rows = normalizePilotRows(pilots, observedAt);
+  const skipPersistence = isLocalRequest(request);
 
-  if (env.DB) {
-    try {
-      await persistLatestPositions(env.DB, rows);
-    } catch (error) {
-      recordPersistError("latest_positions", error);
-      console.error("persistLatestPositions failed", error);
-    }
-
+  if (env.DB && !skipPersistence) {
     ctx.waitUntil(
       Promise.all([
+        persistLatestPositions(env.DB, rows).catch((error) => {
+          recordPersistError("latest_positions", error);
+          console.error("persistLatestPositions failed", error);
+        }),
         persistTrajectoryPoints(env.DB, rows).catch((error) => {
           recordPersistError("trajectory_points", error);
           console.error("persistTrajectoryPoints failed", error);
@@ -159,6 +162,17 @@ async function handleVatsim(env, ctx) {
 }
 
 async function handleHistory(request, env) {
+  if (isLocalRequest(request)) {
+    return json({
+      callsign: String(new URL(request.url).searchParams.get("callsign") || "").trim().toUpperCase(),
+      points: [],
+    }, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      },
+    });
+  }
+
   if (!env.DB) return json({ error: "database_not_bound" }, { status: 503 });
 
   const url = new URL(request.url);
@@ -214,7 +228,7 @@ export default {
     }
 
     if (url.pathname === "/api/vatsim") {
-      return handleVatsim(env, ctx);
+      return handleVatsim(request, env, ctx);
     }
 
     if (url.pathname === "/api/history") {
