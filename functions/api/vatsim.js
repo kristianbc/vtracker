@@ -17,9 +17,11 @@ function json(data, init = {}) {
 
 async function persistSnapshot(db, pilots, observedAt) {
   if (!db || !pilots.length) return;
+  const currentCallsigns = new Set();
   for (const pilot of pilots) {
     const callsign = String(pilot.callsign || "").trim().toUpperCase();
     if (!callsign || typeof pilot.latitude !== "number" || typeof pilot.longitude !== "number") continue;
+    currentCallsigns.add(callsign);
 
     const latest = await db
       .prepare("SELECT lat, lon FROM latest_positions WHERE callsign = ?1")
@@ -48,7 +50,26 @@ async function persistSnapshot(db, pilots, observedAt) {
         .prepare(
           "INSERT INTO latest_positions (callsign, observed_at, lat, lon) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(callsign) DO UPDATE SET observed_at = excluded.observed_at, lat = excluded.lat, lon = excluded.lon"
         )
-        .bind(callsign, observedAt, pilot.latitude, pilot.longitude),
+      .bind(callsign, observedAt, pilot.latitude, pilot.longitude),
+    ]);
+  }
+
+  if (!currentCallsigns.size) return;
+
+  const existing = await db.prepare("SELECT callsign FROM latest_positions").all();
+  const endedCallsigns = [];
+  for (const entry of existing.results || []) {
+    const callsign = String(entry.callsign || "").trim().toUpperCase();
+    if (callsign && !currentCallsigns.has(callsign)) endedCallsigns.push(callsign);
+  }
+
+  const chunkSize = 100;
+  for (let i = 0; i < endedCallsigns.length; i += chunkSize) {
+    const chunk = endedCallsigns.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => "?").join(", ");
+    await db.batch([
+      db.prepare(`DELETE FROM latest_positions WHERE callsign IN (${placeholders})`).bind(...chunk),
+      db.prepare(`DELETE FROM aircraft_points WHERE callsign IN (${placeholders})`).bind(...chunk),
     ]);
   }
 }

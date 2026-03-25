@@ -39,6 +39,23 @@ async function cleanupStaleData(db, nowMs) {
   ]);
 }
 
+async function deleteFlightsByCallsigns(db, callsigns) {
+  if (!db || !callsigns.length) return;
+  const chunkSize = 100;
+  for (let i = 0; i < callsigns.length; i += chunkSize) {
+    const chunk = callsigns.slice(i, i + chunkSize);
+    const placeholders = chunk.map(() => "?").join(", ");
+    await db.batch([
+      db
+        .prepare(`DELETE FROM latest_positions WHERE callsign IN (${placeholders})`)
+        .bind(...chunk),
+      db
+        .prepare(`DELETE FROM aircraft_points WHERE callsign IN (${placeholders})`)
+        .bind(...chunk),
+    ]);
+  }
+}
+
 function normalizePilotRows(pilots, observedAt) {
   const rows = [];
   for (const pilot of pilots) {
@@ -57,6 +74,22 @@ function normalizePilotRows(pilots, observedAt) {
     });
   }
   return rows;
+}
+
+async function cleanupEndedFlights(db, rows) {
+  if (!db) return;
+
+  const currentCallsigns = new Set(rows.map((row) => row.callsign));
+  if (!currentCallsigns.size) return;
+  const result = await db.prepare("SELECT callsign FROM latest_positions").all();
+  const endedCallsigns = [];
+
+  for (const entry of result.results || []) {
+    const callsign = String(entry.callsign || "").trim().toUpperCase();
+    if (callsign && !currentCallsigns.has(callsign)) endedCallsigns.push(callsign);
+  }
+
+  await deleteFlightsByCallsigns(db, endedCallsigns);
 }
 
 function isLocalRequest(request) {
@@ -137,20 +170,28 @@ async function handleVatsim(request, env, ctx) {
 
   if (env.DB && !skipPersistence) {
     ctx.waitUntil(
-      Promise.all([
-        persistLatestPositions(env.DB, rows).catch((error) => {
+      (async () => {
+        await persistLatestPositions(env.DB, rows).catch((error) => {
           recordPersistError("latest_positions", error);
           console.error("persistLatestPositions failed", error);
-        }),
-        persistTrajectoryPoints(env.DB, rows).catch((error) => {
+          throw error;
+        });
+        await persistTrajectoryPoints(env.DB, rows).catch((error) => {
           recordPersistError("trajectory_points", error);
           console.error("persistTrajectoryPoints failed", error);
-        }),
-        cleanupStaleData(env.DB, observedAt).catch((error) => {
+          throw error;
+        });
+        await cleanupEndedFlights(env.DB, rows).catch((error) => {
+          recordPersistError("ended_flights_cleanup", error);
+          console.error("cleanupEndedFlights failed", error);
+          throw error;
+        });
+        await cleanupStaleData(env.DB, observedAt).catch((error) => {
           recordPersistError("cleanup", error);
           console.error("cleanupStaleData failed", error);
-        }),
-      ])
+          throw error;
+        });
+      })()
     );
   }
 

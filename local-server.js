@@ -72,8 +72,25 @@ function cleanupPersistedData(nowMs) {
   }
 }
 
+function cleanupEndedFlights(activeCallsigns) {
+  if (!activeCallsigns.size) return;
+  for (const callsign of Object.keys(latestPositions)) {
+    if (!activeCallsigns.has(callsign)) {
+      delete latestPositions[callsign];
+      delete aircraftHistory[callsign];
+    }
+  }
+
+  for (const callsign of Object.keys(aircraftHistory)) {
+    if (!activeCallsigns.has(callsign)) {
+      delete aircraftHistory[callsign];
+    }
+  }
+}
+
 function persistRows(rows, observedAt) {
   cleanupPersistedData(observedAt);
+  cleanupEndedFlights(new Set(rows.map((row) => row.callsign)));
 
   for (const row of rows) {
     latestPositions[row.callsign] = {
