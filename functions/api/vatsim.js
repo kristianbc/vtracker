@@ -1,4 +1,5 @@
 const VATSIM_URL = "https://data.vatsim.net/v3/vatsim-data.json";
+let schemaReady = false;
 
 function corsHeaders() {
   return {
@@ -15,8 +16,54 @@ function json(data, init = {}) {
   return new Response(JSON.stringify(data), { ...init, headers });
 }
 
+async function ensureSchema(db) {
+  if (!db || schemaReady) return;
+  await db.batch([
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS aircraft_points (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        callsign TEXT NOT NULL,
+        observed_at INTEGER NOT NULL,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL,
+        altitude INTEGER,
+        groundspeed INTEGER,
+        heading REAL,
+        squawk TEXT,
+        aircraft_code TEXT
+      )`
+    ),
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS latest_positions (
+        callsign TEXT PRIMARY KEY,
+        observed_at INTEGER NOT NULL,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL
+      )`
+    ),
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS ingested_snapshots (
+        observed_at INTEGER PRIMARY KEY,
+        created_at INTEGER NOT NULL
+      )`
+    ),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_aircraft_points_callsign_time ON aircraft_points (callsign, observed_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_aircraft_points_observed_at ON aircraft_points (observed_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_latest_positions_observed_at ON latest_positions (observed_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_ingested_snapshots_created_at ON ingested_snapshots (created_at)"),
+  ]);
+  schemaReady = true;
+}
+
 async function persistSnapshot(db, pilots, observedAt) {
   if (!db || !pilots.length) return;
+  await ensureSchema(db);
+  const claim = await db
+    .prepare("INSERT OR IGNORE INTO ingested_snapshots (observed_at, created_at) VALUES (?1, ?2)")
+    .bind(observedAt, Date.now())
+    .run();
+  if (!claim || !claim.meta || claim.meta.changes < 1) return;
+
   const currentCallsigns = new Set();
   for (const pilot of pilots) {
     const callsign = String(pilot.callsign || "").trim().toUpperCase();

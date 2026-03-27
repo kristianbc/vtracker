@@ -17,12 +17,53 @@ function json(data, init = {}) {
 
 let lastPersistStatus = { phase: null, message: null, timestamp: 0 };
 let lastCleanupAt = 0;
+let schemaReady = false;
+const JETAPI_URL = "https://www.jetapi.dev/api";
 function recordPersistError(phase, error) {
   lastPersistStatus = {
     phase,
     message: error ? String(error) : null,
     timestamp: Date.now(),
   };
+}
+
+async function ensureSchema(db) {
+  if (!db || schemaReady) return;
+  await db.batch([
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS aircraft_points (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        callsign TEXT NOT NULL,
+        observed_at INTEGER NOT NULL,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL,
+        altitude INTEGER,
+        groundspeed INTEGER,
+        heading REAL,
+        squawk TEXT,
+        aircraft_code TEXT
+      )`
+    ),
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS latest_positions (
+        callsign TEXT PRIMARY KEY,
+        observed_at INTEGER NOT NULL,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL
+      )`
+    ),
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS ingested_snapshots (
+        observed_at INTEGER PRIMARY KEY,
+        created_at INTEGER NOT NULL
+      )`
+    ),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_aircraft_points_callsign_time ON aircraft_points (callsign, observed_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_aircraft_points_observed_at ON aircraft_points (observed_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_latest_positions_observed_at ON latest_positions (observed_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS idx_ingested_snapshots_created_at ON ingested_snapshots (created_at)"),
+  ]);
+  schemaReady = true;
 }
 
 async function cleanupStaleData(db, nowMs) {
@@ -32,10 +73,12 @@ async function cleanupStaleData(db, nowMs) {
 
   const staleLatestThreshold = nowMs - 6 * 60 * 60 * 1000;
   const staleHistoryThreshold = nowMs - 48 * 60 * 60 * 1000;
+  const staleSnapshotThreshold = nowMs - 7 * 24 * 60 * 60 * 1000;
 
   await db.batch([
     db.prepare("DELETE FROM latest_positions WHERE observed_at < ?1").bind(staleLatestThreshold),
     db.prepare("DELETE FROM aircraft_points WHERE observed_at < ?1").bind(staleHistoryThreshold),
+    db.prepare("DELETE FROM ingested_snapshots WHERE created_at < ?1").bind(staleSnapshotThreshold),
   ]);
 }
 
@@ -92,6 +135,15 @@ async function cleanupEndedFlights(db, rows) {
   await deleteFlightsByCallsigns(db, endedCallsigns);
 }
 
+async function claimSnapshotIngest(db, observedAt) {
+  if (!db) return false;
+  const result = await db
+    .prepare("INSERT OR IGNORE INTO ingested_snapshots (observed_at, created_at) VALUES (?1, ?2)")
+    .bind(observedAt, Date.now())
+    .run();
+  return Boolean(result && result.meta && result.meta.changes > 0);
+}
+
 function isLocalRequest(request) {
   const hostname = new URL(request.url).hostname;
   return hostname === "127.0.0.1" || hostname === "localhost";
@@ -99,16 +151,27 @@ function isLocalRequest(request) {
 
 async function persistLatestPositions(db, rows) {
   if (!db || !rows.length) return;
-  const stmt = db.prepare(
-    `INSERT INTO latest_positions (callsign, observed_at, lat, lon)
-     VALUES (?1, ?2, ?3, ?4)
-     ON CONFLICT(callsign) DO UPDATE SET
-       observed_at = excluded.observed_at,
-       lat = excluded.lat,
-       lon = excluded.lon`
-  );
-  for (const row of rows) {
-    await stmt.bind(row.callsign, row.observedAt, row.lat, row.lon).run();
+  const chunkSize = 20;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    const placeholders = [];
+    const bindings = [];
+    for (const row of chunk) {
+      placeholders.push("(?, ?, ?, ?)");
+      bindings.push(row.callsign, row.observedAt, row.lat, row.lon);
+    }
+
+    await db
+      .prepare(
+        `INSERT INTO latest_positions (callsign, observed_at, lat, lon)
+         VALUES ${placeholders.join(", ")}
+         ON CONFLICT(callsign) DO UPDATE SET
+           observed_at = excluded.observed_at,
+           lat = excluded.lat,
+           lon = excluded.lon`
+      )
+      .bind(...bindings)
+      .run();
   }
 }
 
@@ -171,6 +234,18 @@ async function handleVatsim(request, env, ctx) {
   if (env.DB && !skipPersistence) {
     ctx.waitUntil(
       (async () => {
+        await ensureSchema(env.DB).catch((error) => {
+          recordPersistError("schema", error);
+          console.error("ensureSchema failed", error);
+          throw error;
+        });
+        const shouldPersist = await claimSnapshotIngest(env.DB, observedAt).catch((error) => {
+          recordPersistError("snapshot_claim", error);
+          console.error("claimSnapshotIngest failed", error);
+          throw error;
+        });
+        if (!shouldPersist) return;
+
         await persistLatestPositions(env.DB, rows).catch((error) => {
           recordPersistError("latest_positions", error);
           console.error("persistLatestPositions failed", error);
@@ -256,6 +331,68 @@ function handleHealth() {
   });
 }
 
+function mapJetApiResponse(data, registration) {
+  const images = data && data.JetPhotos && Array.isArray(data.JetPhotos.Images) ? data.JetPhotos.Images : [];
+  return {
+    photos: images.map((item, index) => ({
+      photoId: item.Link ? String(item.Link).split("/").pop() : `${registration}-${index}`,
+      registration: (data.JetPhotos && data.JetPhotos.Reg) || registration || "N/A",
+      aircraftType: item.Aircraft || (data.FlightRadar && data.FlightRadar.Aircraft) || "N/A",
+      airline: item.Airline || (data.FlightRadar && data.FlightRadar.Airline) || "N/A",
+      photographer: item.Photographer || "N/A",
+      location: item.Location || "N/A",
+      imageUrl: item.Image || null,
+      thumbnailUrl: item.Thumbnail || item.Image || null,
+      photoPageUrl: item.Link || "N/A",
+      photoDate: item.DateTaken || "N/A",
+      uploadedDate: item.DateUploaded || "N/A",
+      serial: item.Serial || "N/A",
+    })),
+    count: images.length,
+  };
+}
+
+async function handleJetPhotos(request) {
+  const url = new URL(request.url);
+  const registration = String(url.searchParams.get("registration") || "").trim().toUpperCase();
+  if (!registration) return json({ error: "registration_required" }, { status: 400 });
+
+  const upstreamUrl = new URL(JETAPI_URL);
+  upstreamUrl.searchParams.set("reg", registration);
+
+  let upstream;
+  try {
+    upstream = await fetch(upstreamUrl.toString(), {
+      headers: {
+        "user-agent": "vtracker-worker/1.0",
+        "accept": "application/json,text/plain,*/*",
+      },
+      cf: { cacheTtl: 3600, cacheEverything: true },
+    });
+  } catch (error) {
+    return json({ photos: [], count: 0, unavailable: true }, {
+      headers: {
+        "Cache-Control": "public, max-age=300",
+      },
+    });
+  }
+
+  if (!upstream.ok) {
+    return json({ photos: [], count: 0, unavailable: true, status: upstream.status }, {
+      headers: {
+        "Cache-Control": "public, max-age=300",
+      },
+    });
+  }
+
+  const data = await upstream.json();
+  return json(mapJetApiResponse(data, registration), {
+    headers: {
+      "Cache-Control": "public, max-age=3600",
+    },
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
@@ -274,6 +411,10 @@ export default {
 
     if (url.pathname === "/api/history") {
       return handleHistory(request, env);
+    }
+
+    if (url.pathname === "/api/jetphotos") {
+      return handleJetPhotos(request);
     }
 
     return env.ASSETS.fetch(request);

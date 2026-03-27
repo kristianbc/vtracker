@@ -20,3 +20,17 @@ CREATE TABLE IF NOT EXISTS latest_positions (
   lat REAL NOT NULL,
   lon REAL NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_aircraft_points_observed_at
+ON aircraft_points (observed_at);
+
+CREATE INDEX IF NOT EXISTS idx_latest_positions_observed_at
+ON latest_positions (observed_at);
+
+CREATE TABLE IF NOT EXISTS ingested_snapshots (
+  observed_at INTEGER PRIMARY KEY,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingested_snapshots_created_at
+ON ingested_snapshots (created_at);

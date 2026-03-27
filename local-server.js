@@ -9,6 +9,7 @@ const HISTORY_FILE = path.join(DATA_DIR, "aircraft_history.json");
 const HOST = "127.0.0.1";
 const PORT = 8787;
 const VATSIM_URL = "https://data.vatsim.net/v3/vatsim-data.json";
+const JETAPI_URL = "https://www.jetapi.dev/api";
 const LATEST_TTL_MS = 6 * 60 * 60 * 1000;
 const HISTORY_TTL_MS = 48 * 60 * 60 * 1000;
 
@@ -27,6 +28,7 @@ const MIME_TYPES = {
 let latestPositions = Object.create(null);
 let aircraftHistory = Object.create(null);
 let persistTimer = null;
+let lastObservedAt = 0;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -41,6 +43,11 @@ function loadJsonFile(filePath, fallback) {
 function loadPersistedData() {
   latestPositions = loadJsonFile(LATEST_FILE, Object.create(null));
   aircraftHistory = loadJsonFile(HISTORY_FILE, Object.create(null));
+  for (const points of Object.values(aircraftHistory)) {
+    if (!Array.isArray(points) || !points.length) continue;
+    const last = points[points.length - 1];
+    if (last && last.observed_at && last.observed_at > lastObservedAt) lastObservedAt = last.observed_at;
+  }
   cleanupPersistedData(Date.now());
 }
 
@@ -89,6 +96,8 @@ function cleanupEndedFlights(activeCallsigns) {
 }
 
 function persistRows(rows, observedAt) {
+  if (observedAt <= lastObservedAt) return;
+  lastObservedAt = observedAt;
   cleanupPersistedData(observedAt);
   cleanupEndedFlights(new Set(rows.map((row) => row.callsign)));
 
@@ -143,6 +152,27 @@ function sendFile(res, filePath) {
     });
     res.end(data);
   });
+}
+
+function mapJetApiResponse(data, registration) {
+  const images = data && data.JetPhotos && Array.isArray(data.JetPhotos.Images) ? data.JetPhotos.Images : [];
+  return {
+    photos: images.map((item, index) => ({
+      photoId: item.Link ? String(item.Link).split("/").pop() : `${registration}-${index}`,
+      registration: (data.JetPhotos && data.JetPhotos.Reg) || registration || "N/A",
+      aircraftType: item.Aircraft || (data.FlightRadar && data.FlightRadar.Aircraft) || "N/A",
+      airline: item.Airline || (data.FlightRadar && data.FlightRadar.Airline) || "N/A",
+      photographer: item.Photographer || "N/A",
+      location: item.Location || "N/A",
+      imageUrl: item.Image || null,
+      thumbnailUrl: item.Thumbnail || item.Image || null,
+      photoPageUrl: item.Link || "N/A",
+      photoDate: item.DateTaken || "N/A",
+      uploadedDate: item.DateUploaded || "N/A",
+      serial: item.Serial || "N/A",
+    })),
+    count: images.length,
+  };
 }
 
 function safePathname(urlPath) {
@@ -215,6 +245,35 @@ async function handleApi(req, res) {
       res.end(body);
     } catch (error) {
       sendJson(res, 502, { error: "upstream_fetch_failed", detail: String(error) });
+    }
+    return true;
+  }
+
+  if (url.pathname === "/api/jetphotos") {
+    const registration = String(url.searchParams.get("registration") || "").trim().toUpperCase();
+    if (!registration) {
+      sendJson(res, 400, { error: "registration_required" });
+      return true;
+    }
+
+    const upstreamUrl = new URL(JETAPI_URL);
+    upstreamUrl.searchParams.set("reg", registration);
+
+    try {
+      const upstream = await fetch(upstreamUrl, {
+        headers: {
+          "user-agent": "vtracker-local/1.0",
+          "accept": "application/json,text/plain,*/*",
+        },
+      });
+      if (!upstream.ok) {
+        sendJson(res, 200, { photos: [], count: 0, unavailable: true, status: upstream.status });
+        return true;
+      }
+      const data = await upstream.json();
+      sendJson(res, 200, mapJetApiResponse(data, registration));
+    } catch (error) {
+      sendJson(res, 200, { photos: [], count: 0, unavailable: true });
     }
     return true;
   }

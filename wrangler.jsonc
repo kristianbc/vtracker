@@ -9,7 +9,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "vtracker-db"
+      "database_name": "vtracker-db",
+      "database_id": "79fa6259-27af-433b-9cde-628ad6b417a5"
     }
   ],
   "vars": {
