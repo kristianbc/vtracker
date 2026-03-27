@@ -160,6 +160,8 @@ body{background:var(--bg);font-family:'Barlow Condensed',sans-serif;color:var(--
 .maplibregl-marker{z-index:500}
 .airport-marker{cursor:pointer;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
 .airport-marker img{display:block;width:100%;height:100%;image-rendering:auto}
+.plane-sprite{display:block;transform-origin:center center;will-change:transform}
+.plane-sprite img{display:block;width:100%;height:100%;image-rendering:crisp-edges;filter:drop-shadow(1px 0 0 rgba(0,0,0,.36)) drop-shadow(-1px 0 0 rgba(0,0,0,.36)) drop-shadow(0 1px 0 rgba(0,0,0,.36)) drop-shadow(0 -1px 0 rgba(0,0,0,.36)) drop-shadow(2px 3px 0 rgba(0,0,0,.22));transform:translateZ(0)}
 .plane-tooltip{position:fixed;pointer-events:none;z-index:800;display:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}
 .plane-tooltip svg.tt-bg{position:absolute;top:0;left:0;width:100%;height:100%}
 .plane-tooltip .tt-inner{position:absolute;top:0;left:0;right:0;color:#111;font-family:'Open Sans',sans-serif;font-size:12px;font-weight:600;line-height:1;letter-spacing:.2px;padding:4px 9px;white-space:nowrap;display:flex;align-items:center;justify-content:center}#loading{position:absolute;inset:0;background:var(--bg);z-index:2000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
@@ -432,10 +434,46 @@ var gSelectedAirportId=null;
 var gHoveredAirportId=null;
 var gAirportMarkers=Object.create(null);
 var gAirportIconUrls={blue:'',orange:''};
+var gAircraftMarkerImagesReady=false, gAircraftMarkerImagesLoading=null, gAircraftSpriteSheet=null;
+var gAircraftMarkerIconUrls={
+  normal:Object.create(null),
+  active:Object.create(null),
+  emergency:Object.create(null)
+};
 var gAirportTooltipSelected=document.getElementById('airport-tooltip-selected');
 var gAirportTooltipHover=document.getElementById('airport-tooltip-hover');
 var gAirportTooltipSelectedId=null;
 var gAirportTooltipHoverId=null;
+var AIRCRAFT_SPRITE_SPECS={
+  A225_0:{x:390,y:0,width:340,height:340,displayHeight:30},
+  A380_0:{x:0,y:390,width:316,height:316,displayHeight:29},
+  B777_0:{x:316,y:390,width:316,height:316,displayHeight:28},
+  B747_0:{x:730,y:0,width:308,height:308,displayHeight:28},
+  A343_0:{x:730,y:308,width:292,height:292,displayHeight:27},
+  A346_0:{x:0,y:706,width:292,height:292,displayHeight:27},
+  A330_0:{x:292,y:706,width:276,height:276,displayHeight:26},
+  B767_0:{x:568,y:706,width:276,height:276,displayHeight:25},
+  MD11_0:{x:1038,y:0,width:276,height:276,displayHeight:26},
+  SI2_0:{x:1038,y:276,width:276,height:276,displayHeight:24},
+  A3ST_0:{x:1038,y:552,width:268,height:268,displayHeight:27},
+  B757_0:{x:0,y:998,width:252,height:252,displayHeight:24},
+  CONC_0:{x:1314,y:0,width:246,height:600,displayHeight:24},
+  B738_0:{x:1314,y:600,width:236,height:236,displayHeight:23},
+  A320_0:{x:1314,y:836,width:228,height:228,displayHeight:22},
+  FOKKER100_0:{x:252,y:998,width:228,height:228,displayHeight:22},
+  B736_0:{x:708,y:998,width:212,height:212,displayHeight:21},
+  RJ85_0:{x:920,y:998,width:212,height:212,displayHeight:21},
+  Q300_0:{x:0,y:1250,width:204,height:204,displayHeight:21},
+  EC_0:{x:392,y:1250,width:188,height:188,displayHeight:19},
+  EC_1:{x:580,y:1250,width:188,height:188,displayHeight:19},
+  FGTR_0:{x:768,y:1250,width:188,height:188,displayHeight:19},
+  LJ60_0:{x:956,y:1250,width:188,height:188,displayHeight:18},
+  C303_0:{x:1314,y:1064,width:172,height:172,displayHeight:17},
+  ASW20_0:{x:1728,y:1064,width:164,height:164,displayHeight:16},
+  C206_0:{x:1728,y:1228,width:164,height:164,displayHeight:16},
+  GRND_0:{x:1144,y:1250,width:164,height:164,displayHeight:16},
+  DRON_0:{x:1308,y:1250,width:140,height:140,displayHeight:15}
+};
 
 function parseCsvLine(line){
   var out=[], cur='', q=false;
@@ -464,6 +502,68 @@ function airportSearchKeys(ap){
 function airportFlagUrl(countryCode){
   var code=String(countryCode||'').trim().toLowerCase();
   return code ? 'https://flagcdn.com/'+code+'.svg' : '';
+}
+function sliceAircraftSpriteToUrl(img, spec, color, targetHeight){
+  var targetWidth=Math.max(14, Math.round(targetHeight*(spec.width/spec.height)));
+  var dpr=Math.max(2, Math.ceil(window.devicePixelRatio||1));
+  var srcCanvas=document.createElement('canvas');
+  srcCanvas.width=targetWidth*dpr;
+  srcCanvas.height=targetHeight*dpr;
+  var srcCtx=srcCanvas.getContext('2d',{willReadFrequently:true});
+  srcCtx.imageSmoothingEnabled=false;
+  srcCtx.clearRect(0,0,srcCanvas.width,srcCanvas.height);
+  srcCtx.drawImage(img, spec.x, spec.y, spec.width, spec.height, 0, 0, srcCanvas.width, srcCanvas.height);
+  var imageData=srcCtx.getImageData(0,0,srcCanvas.width,srcCanvas.height);
+  var data=imageData.data;
+  var rgb=[
+    parseInt(color.slice(1,3),16),
+    parseInt(color.slice(3,5),16),
+    parseInt(color.slice(5,7),16)
+  ];
+  for(var i=0;i<data.length;i+=4){
+    var lum=Math.max(data[i], data[i+1], data[i+2]);
+    if(lum<12){
+      data[i+3]=0;
+      continue;
+    }
+    data[i]=rgb[0];
+    data[i+1]=rgb[1];
+    data[i+2]=rgb[2];
+    data[i+3]=lum;
+  }
+  srcCtx.putImageData(imageData,0,0);
+  return srcCanvas.toDataURL('image/png');
+}
+function getAircraftMarkerIconUrl(type, state, height){
+  if(!gAircraftSpriteSheet) return '';
+  var spec=AIRCRAFT_SPRITE_SPECS[type]||AIRCRAFT_SPRITE_SPECS.A320_0;
+  var key=type+'@'+height;
+  if(gAircraftMarkerIconUrls[state][key]) return gAircraftMarkerIconUrls[state][key];
+  var color=state==='emergency' ? '#e02020' : (state==='active' ? '#ec5c5c' : '#fcd600');
+  gAircraftMarkerIconUrls[state][key]=sliceAircraftSpriteToUrl(gAircraftSpriteSheet, spec, color, height);
+  return gAircraftMarkerIconUrls[state][key];
+}
+function refreshAircraftMarkers(){
+  Object.keys(gMarkers).forEach(function(cs){
+    var p=gPilots.get(cs);
+    if(p) upsertMarker(cs,p);
+  });
+}
+async function ensureAircraftMarkerImages(){
+  if(gAircraftMarkerImagesReady) return;
+  if(gAircraftMarkerImagesLoading) return gAircraftMarkerImagesLoading;
+  gAircraftMarkerImagesLoading=new Promise(function(resolve,reject){
+    var img=new Image();
+    img.onload=function(){
+      gAircraftSpriteSheet=img;
+      gAircraftMarkerImagesReady=true;
+      resolve();
+      refreshAircraftMarkers();
+    };
+    img.onerror=reject;
+    img.src='img/aircrafts-sprite.png';
+  });
+  return gAircraftMarkerImagesLoading;
 }
 async function ensureAirportImages(){
   if(gAirportImagesReady) return;
@@ -1048,33 +1148,114 @@ var ICON_SVGS={
     +'<circle cx="25" cy="75" r="10"/><circle cx="75" cy="75" r="10"/>'
     +'<circle cx="50" cy="50" r="6"/>'
 };
-var AIRCRAFT_GROUPS={
-  heli:['B412','B429','B430','B505','EC35','EC45','EC55','EC75','H125','H130','H135','H145','H160','R44','R66','S92','UH60','A109','A139'],
-  glider:['GLID','DG10','DG50','ASK21','ASW2','DUOD'],
-  fighter:['F16','F18','FA18','F22','F35','EUFI','TYPH','M346','L39','A10','SU27','MIG2','MIG3','T38'],
-  drone:['UAV','DRON','MQ9','RQ4'],
-  turboprop:['DH8D','DH8C','DH8A','AT72','AT76','AT45','AT43','AT46','SF34','C208','PC12','BE20','B190','JS32','E120','L410'],
-  bizjet:['C25A','C25B','C25C','C25M','C500','C510','C525','C550','C560','C650','C680','C700','CL30','CL35','CL60','E35L','E45X','E50P','E55P','FA50','FA7X','F2TH','F900','GL5T','GL6T','HDJT','LJ35','LJ45','LJ60'],
-  regional:['CRJ2','CRJ7','CRJ9','CRJX','E170','E175','E190','E195','F100','F70'],
-  wide:['A332','A333','A339','A342','A343','A345','A346','A359','A35K','A388','B741','B742','B743','B744','B748','B763','B764','B772','B773','B77L','B77W','B788','B789','B78X','MD11']
+var AIRCRAFT_SPRITE_GROUPS={
+  A225_0:['A225','AN225','AN12','AN22','AN24','AN26','AN72','AN124','IL76','C17','C5M'],
+  A380_0:['A388'],
+  B777_0:['B772','B773','B77L','B77W','B777','B77F','B787','B788','B789','B78X'],
+  B747_0:['B741','B742','B743','B744','B748','B744F','B748F','B74F'],
+  A343_0:['A342','A343'],
+  A346_0:['A345','A346'],
+  A330_0:['A300','A310','A30B','A306','A332','A333','A332F','A338','A339','A359','A35K'],
+  B767_0:['B762','B763','B763F','B764'],
+  MD11_0:['MD11','DC10','L101'],
+  SI2_0:['SI2'],
+  A3ST_0:['A3ST','BLCF'],
+  B757_0:['B752','B753','B757'],
+  CONC_0:['CONC'],
+  B738_0:['B737','B738','B739','B37M','B38M','B39M','B3XM'],
+  A320_0:['A318','A319','A320','A20N','A321','A21N','A32N','A220','BCS1','BCS3','E170','E175','E190','E195'],
+  FOKKER100_0:['F100','F70'],
+  B736_0:['B731','B732','B733','B734','B735','B736'],
+  RJ85_0:['RJ85','B462','B463','B712','DC91','DC92','MD81','MD82','MD83','MD87','MD88','CRJ2','CRJ7','CRJ9','CRJX'],
+  Q300_0:['DH8A','DH8C','DH8D','AT43','AT45','AT46','AT72','AT75','AT76','SF34','C208','PC12','BE20','B190','JS32','E120','L410','D328','F50'],
+  EC_0:['EC35','EC45','EC55','EC75','H125','H130','H135','H145','H160','A109','A139','AW09','AW109','AW139','BK17','B06','B407','B412','B429','B430','B505','BELL','KA27','MI17','R44','R66','S61','S76','S92','UH60','H47'],
+  FGTR_0:['F16','F18','FA18','F22','F35','EUFI','TYPH','M346','L39','A10','SU27','SU57','MIG2','MIG3','T38','RAPT','TORN'],
+  LJ60_0:['C25A','C25B','C25C','C25M','C500','C510','C525','C550','C560','C650','C680','C700','CL30','CL35','CL60','E35L','E45X','E50P','E55P','FA50','FA7X','F2TH','F900','GL5T','GL6T','HDJT','LJ35','LJ45','LJ60','G280','G450','G550','G650','PRM1'],
+  C303_0:['C303','BE55','BE58','BE60','PA30','PA31','PA34','PA44','DA42','C310','C421'],
+  ASW20_0:['GLID','DG10','DG50','ASK21','ASW2','ASW20','DUOD','G102','LS4','LS6'],
+  C206_0:['C152','C162','C172','C175','C177','C182','C185','C206','C210','DA20','DA40','DR40','P28A','P28R','PA18','PA28','PA32','SR20','SR22','TB10','TB20'],
+  GRND_0:['GRND','PUSH','TUG'],
+  DRON_0:['UAV','DRON','MQ9','RQ4','TB2']
 };
+var AIRCRAFT_SPRITE_FALLBACKS=[
+  {re:/^(A225|AN225|AN1|IL76|C17|C5)/, sprite:'A225_0'},
+  {re:/^A388$/, sprite:'A380_0'},
+  {re:/^(A3ST|BLCF)/, sprite:'A3ST_0'},
+  {re:/^(B77|B78)/, sprite:'B777_0'},
+  {re:/^B74/, sprite:'B747_0'},
+  {re:/^A34[23]$/, sprite:'A343_0'},
+  {re:/^A34[56]$/, sprite:'A346_0'},
+  {re:/^(A30|A31|A332|A333|A338|A339|A35)/, sprite:'A330_0'},
+  {re:/^B76/, sprite:'B767_0'},
+  {re:/^(MD11|DC10|L101)/, sprite:'MD11_0'},
+  {re:/^SI2$/, sprite:'SI2_0'},
+  {re:/^B75/, sprite:'B757_0'},
+  {re:/^CONC$/, sprite:'CONC_0'},
+  {re:/^(B737|B738|B739|B37M|B38M|B39M|B3XM)/, sprite:'B738_0'},
+  {re:/^(A318|A319|A320|A321|A20N|A21N|A32N|A220|BCS|E17|E19)/, sprite:'A320_0'},
+  {re:/^(F100|F70)/, sprite:'FOKKER100_0'},
+  {re:/^B73[1-6]/, sprite:'B736_0'},
+  {re:/^(RJ85|B46|B712|DC9|MD8|CRJ)/, sprite:'RJ85_0'},
+  {re:/^(DH8|AT4|AT7|SF34|C208|PC12|BE20|B190|JS32|E120|L410|D328|F50)/, sprite:'Q300_0'},
+  {re:/^(EC|H1|H47|A109|A139|AW|BK|B06|B40|B50|KA27|MI17|R44|R66|S61|S76|S92|UH60)/, sprite:'EC_0'},
+  {re:/^(F16|F18|FA18|F22|F35|EUFI|TYPH|M346|L39|A10|SU27|SU57|MIG|T38|RAPT|TORN)/, sprite:'FGTR_0'},
+  {re:/^(C2[5-9]|C5[0-9]|C6[5-9]|C700|CL|E3|E4|E5|FA|F2|F9|GL|HDJ|LJ|PRM|G28|G45|G55|G65)/, sprite:'LJ60_0'},
+  {re:/^(C303|BE5|BE6|PA3|PA4|DA42|C310|C421)/, sprite:'C303_0'},
+  {re:/^(GLID|DG|ASK|ASW|DUOD|G102|LS4|LS6)/, sprite:'ASW20_0'},
+  {re:/^(C15|C16|C17[2-9]?|C18|C20|C21|DA2|DA4|DR4|P28|PA18|PA28|PA32|SR2|TB1)/, sprite:'C206_0'},
+  {re:/^(GRND|PUSH|TUG)/, sprite:'GRND_0'},
+  {re:/^(UAV|DRON|MQ9|RQ4|TB2)/, sprite:'DRON_0'}
+];
 function aircraftTypeFor(p){
-  var fp=p&&p.flight_plan,raw=(fp&&(fp.aircraft_short||fp.aircraft))||'';
-  var m=String(raw).toUpperCase().match(/[A-Z0-9]{3,4}/),code=m?m[0]:'';
-  if(!code)return'narrow';
-  for(var k in AIRCRAFT_GROUPS)if(AIRCRAFT_GROUPS[k].indexOf(code)!==-1)return k;
-  if(/^(B7|A3|A2)/.test(code))return'narrow';
-  if(/^(C1|C2|C3|LJ|BE|PC|FA|GL|CL)/.test(code))return'bizjet';
-  return'narrow';
+  var fp=p&&p.flight_plan;
+  var code=extractAircraftTypeCode(fp);
+  if(!code) return 'A320_0';
+  for(var sprite in AIRCRAFT_SPRITE_GROUPS){
+    if(AIRCRAFT_SPRITE_GROUPS[sprite].indexOf(code)!==-1) return sprite;
+  }
+  for(var i=0;i<AIRCRAFT_SPRITE_FALLBACKS.length;i++){
+    if(AIRCRAFT_SPRITE_FALLBACKS[i].re.test(code)) return AIRCRAFT_SPRITE_FALLBACKS[i].sprite;
+  }
+  return 'A320_0';
+}
+function extractAircraftTypeCode(fp){
+  if(!fp) return '';
+  var shortCode=String(fp.aircraft_short||'').trim().toUpperCase();
+  if(/^[A-Z0-9]{3,5}$/.test(shortCode)) return shortCode;
+  var raw=String(fp.aircraft||'').trim().toUpperCase();
+  if(!raw) return shortCode;
+  var firstPart=raw.split('/')[0].trim();
+  firstPart=firstPart.replace(/^\d+\s*/, '').trim();
+  var tokens=firstPart.split(/\s+/).filter(Boolean);
+  for(var i=0;i<tokens.length;i++){
+    if(/^[A-Z0-9]{3,5}$/.test(tokens[i])) return tokens[i];
+  }
+  var fallback=raw.match(/\b[A-Z0-9]{3,5}\b/);
+  return fallback?fallback[0]:'';
+}
+function aircraftMarkerDisplayHeight(type, selected){
+  var spec=AIRCRAFT_SPRITE_SPECS[type]||AIRCRAFT_SPRITE_SPECS.A320_0;
+  var zoom=gMap&&gMap.getZoom?gMap.getZoom():6;
+  var scale=lerp(1.2, 1.52, clamp((zoom-2)/8, 0, 1));
+  var height=Math.round((spec.displayHeight||24)*scale)+(selected?4:0);
+  return Math.max(24, height);
 }
 function makePlaneHTML(hdg,sel,hover,p){
   var type=aircraftTypeFor(p||{});
   var emergency=String((p&&p.transponder)||'')==='7700';
-  var sz=26;
-  var fill=emergency?'#e02020':((sel||hover)?'#ec5c5c':'#ffd000');
+  var fill=emergency?'#e02020':((sel||hover)?'#ec5c5c':'#fcd600');
+  if(gAircraftMarkerImagesReady&&gAircraftSpriteSheet){
+    var spec=AIRCRAFT_SPRITE_SPECS[type]||AIRCRAFT_SPRITE_SPECS.A320_0;
+    var height=aircraftMarkerDisplayHeight(type, sel);
+    var width=Math.max(12, Math.round(height*(spec.width/spec.height)));
+    var state=emergency?'emergency':((sel||hover)?'active':'normal');
+    var src=getAircraftMarkerIconUrl(type, state, height)||getAircraftMarkerIconUrl(type, 'normal', height);
+    return '<span class="plane-sprite" style="width:'+width+'px;height:'+height+'px;transform:rotate('+hdg+'deg)"><img src="'+src+'" alt="" draggable="false"></span>';
+  }
+  var sz=aircraftMarkerDisplayHeight(type, sel);
   return '<svg xmlns="http://www.w3.org/2000/svg" width="'+sz+'" height="'+sz+'" viewBox="0 0 100 100" style="display:block;transform:rotate('+hdg+'deg);transform-origin:center">'
     +'<g fill="'+fill+'" stroke="rgba(0,0,0,0.5)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">'
-    +(ICON_SVGS[type]||ICON_SVGS.narrow)
+    +(ICON_SVGS.narrow)
     +'</g></svg>';
 }
 
@@ -2106,6 +2287,7 @@ async function initMap(){
   gMap.on('render',updateAirportTipPos);
   gMap.on('zoom',updateTipPos);
   gMap.on('zoom',updateAirportTipPos);
+  gMap.on('zoom',refreshAircraftMarkers);
   gMap.on('move',updateTipPos);
   gMap.on('move',updateAirportTipPos);
   gMap.on('mousemove',function(e){
@@ -2122,6 +2304,11 @@ async function initMap(){
   ensureAirportsLoaded();
   ensureAirlinesLoaded();
   if(!gDayNightOn) toggleDayNight();
+  try{
+    await ensureAircraftMarkerImages();
+  }catch(err){
+    console.error('Aircraft sprite load failed', err);
+  }
   await load();
   gFetchId=setInterval(load,gFetchInt);
   animLoop();
