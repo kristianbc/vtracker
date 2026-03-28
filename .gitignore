@@ -3,5 +3,7 @@ node_modules/
 local-data/
 .env
 .env.*
+wrangler-dev.log
+wrangler-dev.err
 Thumbs.db
 Desktop.ini

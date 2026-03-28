@@ -1,10 +1,14 @@
 const VATSIM_URL = "https://data.vatsim.net/v3/vatsim-data.json";
+const JETAPI_URL = "https://www.jetapi.dev/api";
+
+let lastPersistStatus = { phase: null, message: null, timestamp: 0 };
+let lastCleanupAt = 0;
 
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
   };
 }
 
@@ -15,10 +19,6 @@ function json(data, init = {}) {
   return new Response(JSON.stringify(data), { ...init, headers });
 }
 
-let lastPersistStatus = { phase: null, message: null, timestamp: 0 };
-let lastCleanupAt = 0;
-let schemaReady = false;
-const JETAPI_URL = "https://www.jetapi.dev/api";
 function recordPersistError(phase, error) {
   lastPersistStatus = {
     phase,
@@ -27,76 +27,52 @@ function recordPersistError(phase, error) {
   };
 }
 
-async function ensureSchema(db) {
-  if (!db || schemaReady) return;
-  await db.batch([
-    db.prepare(
-      `CREATE TABLE IF NOT EXISTS aircraft_points (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        callsign TEXT NOT NULL,
-        observed_at INTEGER NOT NULL,
-        lat REAL NOT NULL,
-        lon REAL NOT NULL,
-        altitude INTEGER,
-        groundspeed INTEGER,
-        heading REAL,
-        squawk TEXT,
-        aircraft_code TEXT
-      )`
-    ),
-    db.prepare(
-      `CREATE TABLE IF NOT EXISTS latest_positions (
-        callsign TEXT PRIMARY KEY,
-        observed_at INTEGER NOT NULL,
-        lat REAL NOT NULL,
-        lon REAL NOT NULL
-      )`
-    ),
-    db.prepare(
-      `CREATE TABLE IF NOT EXISTS ingested_snapshots (
-        observed_at INTEGER PRIMARY KEY,
-        created_at INTEGER NOT NULL
-      )`
-    ),
-    db.prepare("CREATE INDEX IF NOT EXISTS idx_aircraft_points_callsign_time ON aircraft_points (callsign, observed_at)"),
-    db.prepare("CREATE INDEX IF NOT EXISTS idx_aircraft_points_observed_at ON aircraft_points (observed_at)"),
-    db.prepare("CREATE INDEX IF NOT EXISTS idx_latest_positions_observed_at ON latest_positions (observed_at)"),
-    db.prepare("CREATE INDEX IF NOT EXISTS idx_ingested_snapshots_created_at ON ingested_snapshots (created_at)"),
-  ]);
-  schemaReady = true;
+function hasSupabaseConfig(env) {
+  return Boolean(env && env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
-async function cleanupStaleData(db, nowMs) {
-  if (!db) return;
-  if (lastCleanupAt && nowMs - lastCleanupAt < 60 * 60 * 1000) return;
-  lastCleanupAt = nowMs;
-
-  const staleLatestThreshold = nowMs - 6 * 60 * 60 * 1000;
-  const staleHistoryThreshold = nowMs - 48 * 60 * 60 * 1000;
-  const staleSnapshotThreshold = nowMs - 7 * 24 * 60 * 60 * 1000;
-
-  await db.batch([
-    db.prepare("DELETE FROM latest_positions WHERE observed_at < ?1").bind(staleLatestThreshold),
-    db.prepare("DELETE FROM aircraft_points WHERE observed_at < ?1").bind(staleHistoryThreshold),
-    db.prepare("DELETE FROM ingested_snapshots WHERE created_at < ?1").bind(staleSnapshotThreshold),
-  ]);
+function supabaseBaseUrl(env) {
+  return String(env.SUPABASE_URL || "").replace(/\/+$/, "") + "/rest/v1";
 }
 
-async function deleteFlightsByCallsigns(db, callsigns) {
-  if (!db || !callsigns.length) return;
-  const chunkSize = 100;
-  for (let i = 0; i < callsigns.length; i += chunkSize) {
-    const chunk = callsigns.slice(i, i + chunkSize);
-    const placeholders = chunk.map(() => "?").join(", ");
-    await db.batch([
-      db
-        .prepare(`DELETE FROM latest_positions WHERE callsign IN (${placeholders})`)
-        .bind(...chunk),
-      db
-        .prepare(`DELETE FROM aircraft_points WHERE callsign IN (${placeholders})`)
-        .bind(...chunk),
-    ]);
+function supabaseHeaders(env, extra = {}) {
+  const key = String(env.SUPABASE_SERVICE_ROLE_KEY || "");
+  const headers = {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    ...extra,
+  };
+  return headers;
+}
+
+function buildSupabaseUrl(env, table, query = {}) {
+  const url = new URL(`${supabaseBaseUrl(env)}/${table}`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "") continue;
+    url.searchParams.set(key, String(value));
   }
+  return url.toString();
+}
+
+async function supabaseJsonRequest(env, method, table, options = {}) {
+  const headers = supabaseHeaders(env, options.headers || {});
+  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+
+  const response = await fetch(buildSupabaseUrl(env, table, options.query), {
+    method,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    const detail = text ? `: ${text}` : "";
+    throw new Error(`supabase_${table}_${method}_${response.status}${detail}`);
+  }
+
+  if (response.status === 204) return [];
+  const text = await response.text();
+  return text ? JSON.parse(text) : [];
 }
 
 function normalizePilotRows(pilots, observedAt) {
@@ -106,42 +82,17 @@ function normalizePilotRows(pilots, observedAt) {
     if (!callsign || typeof pilot.latitude !== "number" || typeof pilot.longitude !== "number") continue;
     rows.push({
       callsign,
-      observedAt,
+      observed_at: observedAt,
       lat: pilot.latitude,
       lon: pilot.longitude,
       altitude: pilot.altitude || null,
       groundspeed: pilot.groundspeed || null,
       heading: pilot.heading || null,
       squawk: pilot.transponder || null,
-      aircraftCode: (pilot.flight_plan && (pilot.flight_plan.aircraft_short || pilot.flight_plan.aircraft)) || null,
+      aircraft_code: (pilot.flight_plan && (pilot.flight_plan.aircraft_short || pilot.flight_plan.aircraft)) || null,
     });
   }
   return rows;
-}
-
-async function cleanupEndedFlights(db, rows) {
-  if (!db) return;
-
-  const currentCallsigns = new Set(rows.map((row) => row.callsign));
-  if (!currentCallsigns.size) return;
-  const result = await db.prepare("SELECT callsign FROM latest_positions").all();
-  const endedCallsigns = [];
-
-  for (const entry of result.results || []) {
-    const callsign = String(entry.callsign || "").trim().toUpperCase();
-    if (callsign && !currentCallsigns.has(callsign)) endedCallsigns.push(callsign);
-  }
-
-  await deleteFlightsByCallsigns(db, endedCallsigns);
-}
-
-async function claimSnapshotIngest(db, observedAt) {
-  if (!db) return false;
-  const result = await db
-    .prepare("INSERT OR IGNORE INTO ingested_snapshots (observed_at, created_at) VALUES (?1, ?2)")
-    .bind(observedAt, Date.now())
-    .run();
-  return Boolean(result && result.meta && result.meta.changes > 0);
 }
 
 function isLocalRequest(request) {
@@ -149,125 +100,179 @@ function isLocalRequest(request) {
   return hostname === "127.0.0.1" || hostname === "localhost";
 }
 
-async function persistLatestPositions(db, rows) {
-  if (!db || !rows.length) return;
-  const chunkSize = 20;
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
-    const placeholders = [];
-    const bindings = [];
-    for (const row of chunk) {
-      placeholders.push("(?, ?, ?, ?)");
-      bindings.push(row.callsign, row.observedAt, row.lat, row.lon);
-    }
-
-    await db
-      .prepare(
-        `INSERT INTO latest_positions (callsign, observed_at, lat, lon)
-         VALUES ${placeholders.join(", ")}
-         ON CONFLICT(callsign) DO UPDATE SET
-           observed_at = excluded.observed_at,
-           lat = excluded.lat,
-           lon = excluded.lon`
-      )
-      .bind(...bindings)
-      .run();
-  }
+function quotePostgrestValue(value) {
+  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-async function persistTrajectoryPoints(db, rows) {
-  if (!db || !rows.length) return;
-  const chunkSize = 8;
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
-
-    const pointPlaceholders = [];
-    const pointBindings = [];
-    for (const row of chunk) {
-      pointPlaceholders.push("(?, ?, ?, ?, ?, ?, ?, ?, ?)");
-      pointBindings.push(
-        row.callsign,
-        row.observedAt,
-        row.lat,
-        row.lon,
-        row.altitude,
-        row.groundspeed,
-        row.heading,
-        row.squawk,
-        row.aircraftCode
-      );
-    }
-
-    await db
-      .prepare(
-        `INSERT INTO aircraft_points (callsign, observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code)
-         VALUES ${pointPlaceholders.join(", ")}`
-      )
-      .bind(...pointBindings)
-      .run();
-  }
+function postgrestInFilter(values) {
+  return `(${values.map(quotePostgrestValue).join(",")})`;
 }
 
-async function handleVatsim(request, env, ctx) {
-  const sourceUrl = env.VATSIM_URL || VATSIM_URL;
-  let upstream;
+async function claimSnapshotIngest(env, observedAt) {
+  if (!hasSupabaseConfig(env)) return false;
+
+  const existing = await supabaseJsonRequest(env, "GET", "ingested_snapshots", {
+    query: {
+      select: "observed_at",
+      observed_at: `eq.${observedAt}`,
+      limit: 1,
+    },
+  });
+  if (existing.length) return false;
 
   try {
-    upstream = await fetch(sourceUrl, {
-      headers: { "user-agent": "vtracker-worker/1.0" },
-      cf: { cacheTtl: 0, cacheEverything: false },
+    await supabaseJsonRequest(env, "POST", "ingested_snapshots", {
+      body: [{ observed_at: observedAt, created_at: Date.now() }],
+      headers: {
+        Prefer: "return=minimal",
+      },
     });
+    return true;
   } catch (error) {
-    return json({ error: "upstream_fetch_failed", detail: String(error) }, { status: 502 });
+    if (String(error).includes("_409")) return false;
+    throw error;
+  }
+}
+
+async function persistLatestPositions(env, rows) {
+  if (!rows.length) return;
+  const chunkSize = 500;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize).map((row) => ({
+      callsign: row.callsign,
+      observed_at: row.observed_at,
+      lat: row.lat,
+      lon: row.lon,
+    }));
+
+    await supabaseJsonRequest(env, "POST", "latest_positions", {
+      query: { on_conflict: "callsign" },
+      body: chunk,
+      headers: {
+        Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+    });
+  }
+}
+
+async function persistTrajectoryPoints(env, rows) {
+  if (!rows.length) return;
+  const chunkSize = 250;
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    await supabaseJsonRequest(env, "POST", "aircraft_points", {
+      query: { on_conflict: "callsign,observed_at,lat,lon" },
+      body: chunk,
+      headers: {
+        Prefer: "resolution=ignore-duplicates,return=minimal",
+      },
+    });
+  }
+}
+
+async function deleteFlightsByCallsigns(env, callsigns) {
+  if (!callsigns.length) return;
+  const chunkSize = 100;
+  for (let i = 0; i < callsigns.length; i += chunkSize) {
+    const chunk = callsigns.slice(i, i + chunkSize);
+    const filter = `in.${postgrestInFilter(chunk)}`;
+    await supabaseJsonRequest(env, "DELETE", "latest_positions", {
+      query: { callsign: filter },
+      headers: { Prefer: "return=minimal" },
+    });
+    await supabaseJsonRequest(env, "DELETE", "aircraft_points", {
+      query: { callsign: filter },
+      headers: { Prefer: "return=minimal" },
+    });
+  }
+}
+
+async function cleanupEndedFlights(env, rows) {
+  const currentCallsigns = new Set(rows.map((row) => row.callsign));
+  if (!currentCallsigns.size) return;
+
+  const existing = await supabaseJsonRequest(env, "GET", "latest_positions", {
+    query: { select: "callsign", limit: 5000 },
+  });
+
+  const endedCallsigns = [];
+  for (const entry of existing) {
+    const callsign = String(entry.callsign || "").trim().toUpperCase();
+    if (callsign && !currentCallsigns.has(callsign)) endedCallsigns.push(callsign);
   }
 
+  await deleteFlightsByCallsigns(env, endedCallsigns);
+}
+
+async function cleanupStaleData(env, nowMs) {
+  if (lastCleanupAt && nowMs - lastCleanupAt < 60 * 60 * 1000) return;
+  lastCleanupAt = nowMs;
+
+  const staleLatestThreshold = nowMs - 6 * 60 * 60 * 1000;
+  const staleHistoryThreshold = nowMs - 48 * 60 * 60 * 1000;
+  const staleSnapshotThreshold = nowMs - 7 * 24 * 60 * 60 * 1000;
+
+  await supabaseJsonRequest(env, "DELETE", "latest_positions", {
+    query: { observed_at: `lt.${staleLatestThreshold}` },
+    headers: { Prefer: "return=minimal" },
+  });
+  await supabaseJsonRequest(env, "DELETE", "aircraft_points", {
+    query: { observed_at: `lt.${staleHistoryThreshold}` },
+    headers: { Prefer: "return=minimal" },
+  });
+  await supabaseJsonRequest(env, "DELETE", "ingested_snapshots", {
+    query: { created_at: `lt.${staleSnapshotThreshold}` },
+    headers: { Prefer: "return=minimal" },
+  });
+}
+
+async function ingestSnapshot(env) {
+  const sourceUrl = env.VATSIM_URL || VATSIM_URL;
+  const upstream = await fetch(sourceUrl, {
+    headers: { "user-agent": "vtracker-worker/1.0" },
+    cf: { cacheTtl: 0, cacheEverything: false },
+  });
+
   if (!upstream.ok) {
-    return json({ error: "upstream_bad_status", status: upstream.status }, { status: 502 });
+    throw new Error(`upstream_bad_status_${upstream.status}`);
   }
 
   const data = await upstream.json();
   const pilots = Array.isArray(data.pilots) ? data.pilots : [];
   const observedAt = Date.parse((data.general && data.general.update_timestamp) || "") || Date.now();
   const rows = normalizePilotRows(pilots, observedAt);
+
+  if (!hasSupabaseConfig(env)) return data;
+
+  const shouldPersist = await claimSnapshotIngest(env, observedAt);
+  if (!shouldPersist) return data;
+
+  await persistLatestPositions(env, rows);
+  await persistTrajectoryPoints(env, rows);
+  await cleanupEndedFlights(env, rows);
+  await cleanupStaleData(env, observedAt);
+  return data;
+}
+
+async function handleVatsim(request, env, ctx) {
   const skipPersistence = isLocalRequest(request);
 
-  if (env.DB && !skipPersistence) {
-    ctx.waitUntil(
-      (async () => {
-        await ensureSchema(env.DB).catch((error) => {
-          recordPersistError("schema", error);
-          console.error("ensureSchema failed", error);
-          throw error;
-        });
-        const shouldPersist = await claimSnapshotIngest(env.DB, observedAt).catch((error) => {
-          recordPersistError("snapshot_claim", error);
-          console.error("claimSnapshotIngest failed", error);
-          throw error;
-        });
-        if (!shouldPersist) return;
-
-        await persistLatestPositions(env.DB, rows).catch((error) => {
-          recordPersistError("latest_positions", error);
-          console.error("persistLatestPositions failed", error);
-          throw error;
-        });
-        await persistTrajectoryPoints(env.DB, rows).catch((error) => {
-          recordPersistError("trajectory_points", error);
-          console.error("persistTrajectoryPoints failed", error);
-          throw error;
-        });
-        await cleanupEndedFlights(env.DB, rows).catch((error) => {
-          recordPersistError("ended_flights_cleanup", error);
-          console.error("cleanupEndedFlights failed", error);
-          throw error;
-        });
-        await cleanupStaleData(env.DB, observedAt).catch((error) => {
-          recordPersistError("cleanup", error);
-          console.error("cleanupStaleData failed", error);
-          throw error;
-        });
-      })()
-    );
+  let data;
+  try {
+    if (skipPersistence) {
+      const sourceUrl = env.VATSIM_URL || VATSIM_URL;
+      const upstream = await fetch(sourceUrl, {
+        headers: { "user-agent": "vtracker-worker/1.0" },
+        cf: { cacheTtl: 0, cacheEverything: false },
+      });
+      if (!upstream.ok) return json({ error: "upstream_bad_status", status: upstream.status }, { status: 502 });
+      data = await upstream.json();
+    } else {
+      data = await ingestSnapshot(env);
+    }
+  } catch (error) {
+    recordPersistError("vatsim_ingest", error);
+    return json({ error: "upstream_fetch_failed", detail: String(error) }, { status: 502 });
   }
 
   return json(data, {
@@ -289,7 +294,7 @@ async function handleHistory(request, env) {
     });
   }
 
-  if (!env.DB) return json({ error: "database_not_bound" }, { status: 503 });
+  if (!hasSupabaseConfig(env)) return json({ error: "supabase_not_configured" }, { status: 503 });
 
   const url = new URL(request.url);
   const callsign = String(url.searchParams.get("callsign") || "").trim().toUpperCase();
@@ -298,23 +303,19 @@ async function handleHistory(request, env) {
 
   if (!callsign) return json({ error: "callsign_required" }, { status: 400 });
 
-  const result = before > 0
-    ? await env.DB
-        .prepare(
-          "SELECT observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code FROM aircraft_points WHERE callsign = ?1 AND observed_at < ?2 ORDER BY observed_at DESC LIMIT ?3"
-        )
-        .bind(callsign, before, limit)
-        .all()
-    : await env.DB
-        .prepare(
-          "SELECT observed_at, lat, lon, altitude, groundspeed, heading, squawk, aircraft_code FROM aircraft_points WHERE callsign = ?1 ORDER BY observed_at DESC LIMIT ?2"
-        )
-        .bind(callsign, limit)
-        .all();
+  const query = {
+    select: "observed_at,lat,lon,altitude,groundspeed,heading,squawk,aircraft_code",
+    callsign: `eq.${callsign}`,
+    order: "observed_at.desc",
+    limit,
+  };
+  if (before > 0) query.observed_at = `lt.${before}`;
+
+  const points = await supabaseJsonRequest(env, "GET", "aircraft_points", { query });
 
   return json({
     callsign,
-    points: (result.results || []).slice().reverse(),
+    points: points.slice().reverse(),
   }, {
     headers: {
       "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -322,11 +323,14 @@ async function handleHistory(request, env) {
   });
 }
 
-function handleHealth() {
+function handleHealth(env) {
   return json({
     ok: true,
     service: "vtracker-worker",
     now: Date.now(),
+    storage: {
+      provider: hasSupabaseConfig(env) ? "supabase" : "none",
+    },
     persist: lastPersistStatus,
   });
 }
@@ -365,7 +369,7 @@ async function handleJetPhotos(request) {
     upstream = await fetch(upstreamUrl.toString(), {
       headers: {
         "user-agent": "vtracker-worker/1.0",
-        "accept": "application/json,text/plain,*/*",
+        accept: "application/json,text/plain,*/*",
       },
       cf: { cacheTtl: 3600, cacheEverything: true },
     });
@@ -402,7 +406,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/health") {
-      return handleHealth();
+      return handleHealth(env);
     }
 
     if (url.pathname === "/api/vatsim") {
@@ -418,5 +422,14 @@ export default {
     }
 
     return env.ASSETS.fetch(request);
+  },
+  async scheduled(controller, env, ctx) {
+    if (!hasSupabaseConfig(env)) return;
+    ctx.waitUntil(
+      ingestSnapshot(env).catch((error) => {
+        recordPersistError("scheduled_ingest", error);
+        console.error("scheduled ingest failed", error);
+      })
+    );
   },
 };

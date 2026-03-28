@@ -6,14 +6,13 @@
     "directory": ".",
     "binding": "ASSETS"
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "vtracker-db",
-      "database_id": "79fa6259-27af-433b-9cde-628ad6b417a5"
-    }
-  ],
+  "triggers": {
+    "crons": [
+      "*/1 * * * *"
+    ]
+  },
   "vars": {
-    "VATSIM_URL": "https://data.vatsim.net/v3/vatsim-data.json"
+    "VATSIM_URL": "https://data.vatsim.net/v3/vatsim-data.json",
+    "SUPABASE_URL": "https://rjqktrzprvvcacfdejoe.supabase.co"
   }
 }
