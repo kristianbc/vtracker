@@ -12,6 +12,8 @@ const VATSIM_URL = "https://data.vatsim.net/v3/vatsim-data.json";
 const JETAPI_URL = "https://www.jetapi.dev/api";
 const LATEST_TTL_MS = 6 * 60 * 60 * 1000;
 const HISTORY_TTL_MS = 48 * 60 * 60 * 1000;
+const VATSIM_POLL_INTERVAL_MS = 5000;
+const VATSIM_CACHE_MAX_AGE_MS = 4000;
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -29,6 +31,11 @@ let latestPositions = Object.create(null);
 let aircraftHistory = Object.create(null);
 let persistTimer = null;
 let lastObservedAt = 0;
+let latestVatsimBody = "";
+let latestVatsimFetchedAt = 0;
+let latestVatsimObservedAt = 0;
+let vatsimPollInFlight = null;
+let vatsimPollError = null;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -201,11 +208,77 @@ function normalizePilotRows(pilots, observedAt) {
   return rows;
 }
 
+async function fetchAndPersistVatsimData() {
+  const upstream = await fetch(VATSIM_URL, {
+    headers: { "user-agent": "vtracker-local/1.0" },
+  });
+  if (!upstream.ok) {
+    throw new Error(`upstream_bad_status_${upstream.status}`);
+  }
+
+  const body = await upstream.text();
+  const data = JSON.parse(body);
+  const pilots = Array.isArray(data.pilots) ? data.pilots : [];
+  const observedAt = Date.parse((data.general && data.general.update_timestamp) || "") || Date.now();
+
+  persistRows(normalizePilotRows(pilots, observedAt), observedAt);
+  latestVatsimBody = body;
+  latestVatsimFetchedAt = Date.now();
+  latestVatsimObservedAt = observedAt;
+  vatsimPollError = null;
+
+  return { body, observedAt };
+}
+
+async function ensureVatsimSnapshot(forceRefresh = false) {
+  const cacheFresh = latestVatsimBody && (Date.now() - latestVatsimFetchedAt) <= VATSIM_CACHE_MAX_AGE_MS;
+  if (!forceRefresh && cacheFresh) {
+    return { body: latestVatsimBody, observedAt: latestVatsimObservedAt, cached: true };
+  }
+
+  if (vatsimPollInFlight) {
+    const result = await vatsimPollInFlight;
+    return { ...result, cached: false };
+  }
+
+  vatsimPollInFlight = fetchAndPersistVatsimData();
+  try {
+    const result = await vatsimPollInFlight;
+    return { ...result, cached: false };
+  } finally {
+    vatsimPollInFlight = null;
+  }
+}
+
+function startVatsimPolling() {
+  async function poll() {
+    try {
+      await ensureVatsimSnapshot(true);
+    } catch (error) {
+      vatsimPollError = String(error);
+      console.error("VATSIM poll failed:", error);
+    }
+  }
+
+  poll();
+  return setInterval(poll, VATSIM_POLL_INTERVAL_MS);
+}
+
 async function handleApi(req, res) {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
 
   if (url.pathname === "/api/health") {
-    sendJson(res, 200, { ok: true, service: "vtracker-local", now: Date.now() });
+    sendJson(res, 200, {
+      ok: true,
+      service: "vtracker-local",
+      now: Date.now(),
+      vatsim: {
+        lastFetchedAt: latestVatsimFetchedAt || null,
+        lastObservedAt: latestVatsimObservedAt || null,
+        pollError: vatsimPollError,
+        polling: Boolean(vatsimPollInFlight),
+      },
+    });
     return true;
   }
 
@@ -225,18 +298,7 @@ async function handleApi(req, res) {
 
   if (url.pathname === "/api/vatsim") {
     try {
-      const upstream = await fetch(VATSIM_URL, {
-        headers: { "user-agent": "vtracker-local/1.0" },
-      });
-      if (!upstream.ok) {
-        sendJson(res, 502, { error: "upstream_bad_status", status: upstream.status });
-        return true;
-      }
-      const body = await upstream.text();
-      const data = JSON.parse(body);
-      const pilots = Array.isArray(data.pilots) ? data.pilots : [];
-      const observedAt = Date.parse((data.general && data.general.update_timestamp) || "") || Date.now();
-      persistRows(normalizePilotRows(pilots, observedAt), observedAt);
+      const { body } = await ensureVatsimSnapshot(false);
       res.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -304,7 +366,13 @@ const server = http.createServer(async (req, res) => {
 });
 
 loadPersistedData();
+const vatsimPollTimer = startVatsimPolling();
 
 server.listen(PORT, HOST, () => {
   console.log(`vtracker local server ready on http://${HOST}:${PORT}`);
+});
+
+process.on("SIGINT", () => {
+  clearInterval(vatsimPollTimer);
+  process.exit(0);
 });

@@ -412,6 +412,7 @@ body{background:var(--bg);font-family:'Barlow Condensed',sans-serif;color:var(--
 var VURL = 'https://data.vatsim.net/v3/vatsim-data.json';
 var API_BASE = (window.VTRACKER_API_BASE || '').replace(/\/+$/, '');
 var HISTORY_LIMIT = 4000;
+var STORED_HISTORY_LIMIT = 1500;
 var HISTORY_BATCH_LIMIT = 250;
 var HISTORY_BATCH_SIZE = 12;
 var HISTORY_CONCURRENCY = 3;
@@ -1205,38 +1206,13 @@ async function loadStoredHistory(cs){
   if(!(API_BASE||location.protocol!=='file:')) return;
   gHistoryLoading[cs]=true;
   try{
-    var r=await fetch(apiUrl('/api/history?callsign='+encodeURIComponent(cs)+'&limit='+HISTORY_LIMIT),{cache:'no-store'});
+    var r=await fetch(apiUrl('/api/history?callsign='+encodeURIComponent(cs)+'&limit='+STORED_HISTORY_LIMIT),{cache:'no-store'});
     if(!r.ok) return;
     var data=await r.json();
     mergeHistoryPoints(cs, data.points||[]);
     gHistoryLoaded[cs]=true;
     if(gSelected===cs) drawTrailCanvas();
   }catch(e){}finally{delete gHistoryLoading[cs];}
-}
-
-// Loads history for many planes concurrently during first start
-async function loadAllHistoryBatch(callsigns) {
-  var concurrency = 20; // Fast concurrent loading
-  var queue = callsigns.slice();
-  var total = queue.length;
-  var count = 0;
-  var lp = document.getElementById('lp');
-  lp.style.display = 'block';
-  document.getElementById('lt').textContent = 'SYNCHRONIZING HISTORY...';
-
-  async function worker() {
-    while(queue.length > 0) {
-      var cs = queue.shift();
-      if(!cs) continue;
-      await loadStoredHistory(cs);
-      count++;
-      lp.textContent = count + ' / ' + total + ' AIRCRAFT';
-    }
-  }
-
-  var workers = [];
-  for(var i=0; i<concurrency; i++) workers.push(worker());
-  await Promise.all(workers);
 }
 
 // ─── ICONS — realistic top-down plane silhouettes ─────────────────────────────
@@ -1989,6 +1965,7 @@ var gPilots=new Map();
 var gSelected=null;
 var gPanelMoreOpen=true;
 var gAircraftPhotoCache=Object.create(null);
+var gAircraftPhotoCacheMeta=Object.create(null);
 var gAircraftPhotoPending=Object.create(null);
 var gCurrentAircraftPhotos=[];
 var gCurrentAircraftPhotoIndex=0;
@@ -1996,6 +1973,7 @@ var gCurrentAircraftRegistration='';
 var gLastNearbyPhotoPrefetchAt=0;
 var gLastNearbyPhotoPrefetchCallsign='';
 var AIRCRAFT_PHOTO_PLACEHOLDER='img/img_not_available.png';
+var AIRCRAFT_PHOTO_EMPTY_CACHE_MS=5000;
 var gFetchInt=5000, gFetchId=null, gAnimId=null, gLastFetch=0, gNT=null;
 var gMissingFetches={}, gMissingFetchLimit=6;
 var gMarkerClickFlag=false;
@@ -2044,37 +2022,17 @@ async function load(){
       }
     });
 
-    // If first load, wait for DB history AND then wait 20s for live data buffer
+    // First load should be fast: seed live fixes immediately and lazy-load trail history on demand.
     if(!gInitialLoadDone) {
-      await loadAllHistoryBatch(Array.from(newMap.keys()));
-      
-      // Record first snapshot of live data
       newMap.forEach(function(p,cs){ if(p.latitude&&p.longitude) pushFix(cs, p, nowMs); });
-
-      document.getElementById('lt').textContent = 'GATHERING LIVE DATA...';
-      var lp = document.getElementById('lp');
-      lp.style.display = 'block';
-      
-      // Wait 20 seconds to get the "future" data segment
-      var debugSkip=location.search.includes('debug');
-      for(var s=debugSkip?0:20; s>0; s--) {
-        lp.textContent = 'READY IN ' + s + 's';
-        await new Promise(r => setTimeout(r, 1000));
-      }
-      
-      // Fetch second snapshot to establish the "future" path
-      var res2=await doFetch(), data2=await res2.json();
-      var nowMs2=Date.now();
-      (data2.pilots||[]).forEach(function(p){ if(p.latitude&&p.longitude) pushFix(p.callsign, p, nowMs2); });
-      
       gInitialLoadDone=true;
+    } else {
+      // Normal refresh cycle
+      newMap.forEach(function(p,cs){
+        if(!p.latitude&&!p.longitude) return;
+        pushFix(cs, p, nowMs);
+      });
     }
-
-    // Normal refresh cycle
-    newMap.forEach(function(p,cs){
-      if(!p.latitude&&!p.longitude) return;
-      pushFix(cs, p, nowMs);
-    });
 
     gPilots=newMap;
     syncAircraftMarkers(true);
@@ -2174,8 +2132,10 @@ async function selectPilot(cs){
 function extractRegistrationFromFlightPlan(fp){
   var remarks=String(fp&&fp.remarks||'');
   var match=remarks.match(/\bREG\/([A-Z0-9-]+)\b/i);
-  if(!match) return '';
-  return normalizeAircraftRegistration(match[1]);
+  if(match) return normalizeAircraftRegistration(match[1]);
+  match=remarks.match(/\bRMK\/([A-Z0-9-]{5,6})\b/i);
+  if(match) return normalizeAircraftRegistration(match[1]);
+  return '';
 }
 function prefetchAircraftPhotoForPilot(p){
   var registration=extractRegistrationFromFlightPlan(p&&p.flight_plan);
@@ -2313,7 +2273,15 @@ function stepAircraftPhoto(direction){
 }
 async function fetchAircraftPhotoByRegistration(registration){
   if(!registration) return null;
-  if(Object.prototype.hasOwnProperty.call(gAircraftPhotoCache, registration)) return gAircraftPhotoCache[registration];
+  var now=Date.now();
+  if(Object.prototype.hasOwnProperty.call(gAircraftPhotoCache, registration)){
+    var cached=gAircraftPhotoCache[registration]||[];
+    var meta=gAircraftPhotoCacheMeta[registration]||null;
+    if(cached.length) return cached;
+    if(meta && meta.expiresAt && meta.expiresAt > now) return cached;
+    delete gAircraftPhotoCache[registration];
+    delete gAircraftPhotoCacheMeta[registration];
+  }
   if(Object.prototype.hasOwnProperty.call(gAircraftPhotoPending, registration)) return gAircraftPhotoPending[registration];
   gAircraftPhotoPending[registration]=(async function(){
     try{
@@ -2322,8 +2290,15 @@ async function fetchAircraftPhotoByRegistration(registration){
         var candidate=candidates[i];
         if(candidate!==registration && Object.prototype.hasOwnProperty.call(gAircraftPhotoCache, candidate)){
           var cached=gAircraftPhotoCache[candidate]||[];
+          var candidateMeta=gAircraftPhotoCacheMeta[candidate]||null;
+          if(!cached.length && candidateMeta && candidateMeta.expiresAt && candidateMeta.expiresAt <= Date.now()){
+            delete gAircraftPhotoCache[candidate];
+            delete gAircraftPhotoCacheMeta[candidate];
+          } else {
           gAircraftPhotoCache[registration]=cached;
+          gAircraftPhotoCacheMeta[registration]=candidateMeta||{ expiresAt: Date.now()+AIRCRAFT_PHOTO_EMPTY_CACHE_MS };
           return cached;
+          }
         }
         var url=API_BASE+'/api/jetphotos?registration='+encodeURIComponent(candidate);
         var res=await fetch(url);
@@ -2331,15 +2306,21 @@ async function fetchAircraftPhotoByRegistration(registration){
         var data=await res.json();
         var photos=data&&Array.isArray(data.photos)?data.photos.filter(function(photo){return photo&&(photo.imageUrl||photo.thumbnailUrl);}):[];
         if(photos.length){
-          for(var j=0;j<candidates.length;j++) gAircraftPhotoCache[candidates[j]]=photos;
+          for(var j=0;j<candidates.length;j++){
+            gAircraftPhotoCache[candidates[j]]=photos;
+            gAircraftPhotoCacheMeta[candidates[j]]={ expiresAt: Date.now()+3600000 };
+          }
           gAircraftPhotoCache[registration]=photos;
+          gAircraftPhotoCacheMeta[registration]={ expiresAt: Date.now()+3600000 };
           return photos;
         }
       }
       gAircraftPhotoCache[registration]=[];
+      gAircraftPhotoCacheMeta[registration]={ expiresAt: Date.now()+AIRCRAFT_PHOTO_EMPTY_CACHE_MS };
       return [];
     }catch(err){
       gAircraftPhotoCache[registration]=[];
+      gAircraftPhotoCacheMeta[registration]={ expiresAt: Date.now()+AIRCRAFT_PHOTO_EMPTY_CACHE_MS };
       return [];
     }finally{
       delete gAircraftPhotoPending[registration];
@@ -2589,7 +2570,7 @@ function fillPanel(p){
         photoBlock.innerHTML=renderAircraftPhotoBlockHtml([], 0);
       }
     }
-    if(registration && registrationChanged){
+    if(registration && (registrationChanged || !gCurrentAircraftPhotos.length)){
       fetchAircraftPhotoByRegistration(registration).then(function(photos){
         if(gSelected!==p.callsign) return;
         if(gCurrentAircraftRegistration!==registration) return;

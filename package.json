@@ -1,0 +1,13 @@
+{
+  "name": "vtracker-poller",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Always-on VATSIM poller for Supabase-backed track ingestion",
+  "scripts": {
+    "poller": "node poller.js",
+    "start": "node poller.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

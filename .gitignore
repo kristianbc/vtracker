@@ -1,6 +1,7 @@
 .wrangler/
 node_modules/
 local-data/
+deploy-assets/
 .env
 .env.*
 wrangler-dev.log

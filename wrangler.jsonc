@@ -3,7 +3,7 @@
   "compatibility_date": "2026-03-21",
   "main": "worker.js",
   "assets": {
-    "directory": ".",
+    "directory": "./deploy-assets",
     "binding": "ASSETS"
   },
   "triggers": {
@@ -12,6 +12,8 @@
     ]
   },
   "vars": {
+    "ENABLE_WORKER_INGEST": "false",
+    "ENABLE_SUPABASE_READS": "true",
     "VATSIM_URL": "https://data.vatsim.net/v3/vatsim-data.json",
     "SUPABASE_URL": "https://rjqktrzprvvcacfdejoe.supabase.co"
   }

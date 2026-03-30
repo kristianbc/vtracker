@@ -27,8 +27,20 @@ function recordPersistError(phase, error) {
   };
 }
 
+function clearPersistStatus() {
+  lastPersistStatus = { phase: null, message: null, timestamp: 0 };
+}
+
 function hasSupabaseConfig(env) {
   return Boolean(env && env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function isWorkerIngestEnabled(env) {
+  return String(env.ENABLE_WORKER_INGEST || "").toLowerCase() === "true";
+}
+
+function areSupabaseReadsEnabled(env) {
+  return String(env.ENABLE_SUPABASE_READS || "").toLowerCase() === "true";
 }
 
 function supabaseBaseUrl(env) {
@@ -251,11 +263,12 @@ async function ingestSnapshot(env) {
   await persistTrajectoryPoints(env, rows);
   await cleanupEndedFlights(env, rows);
   await cleanupStaleData(env, observedAt);
+  clearPersistStatus();
   return data;
 }
 
 async function handleVatsim(request, env, ctx) {
-  const skipPersistence = isLocalRequest(request);
+  const skipPersistence = isLocalRequest(request) || !isWorkerIngestEnabled(env);
 
   let data;
   try {
@@ -288,6 +301,19 @@ async function handleHistory(request, env) {
       callsign: String(new URL(request.url).searchParams.get("callsign") || "").trim().toUpperCase(),
       points: [],
     }, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      },
+    });
+  }
+
+  if (!areSupabaseReadsEnabled(env)) {
+    return json({
+      callsign: String(new URL(request.url).searchParams.get("callsign") || "").trim().toUpperCase(),
+      points: [],
+      unavailable: true,
+    }, {
+      status: 503,
       headers: {
         "Cache-Control": "no-store, no-cache, must-revalidate",
       },
@@ -330,6 +356,8 @@ function handleHealth(env) {
     now: Date.now(),
     storage: {
       provider: hasSupabaseConfig(env) ? "supabase" : "none",
+      readsEnabled: areSupabaseReadsEnabled(env),
+      workerIngestEnabled: isWorkerIngestEnabled(env),
     },
     persist: lastPersistStatus,
   });
@@ -371,12 +399,12 @@ async function handleJetPhotos(request) {
         "user-agent": "vtracker-worker/1.0",
         accept: "application/json,text/plain,*/*",
       },
-      cf: { cacheTtl: 3600, cacheEverything: true },
+      cf: { cacheTtl: 0, cacheEverything: false },
     });
   } catch (error) {
     return json({ photos: [], count: 0, unavailable: true }, {
       headers: {
-        "Cache-Control": "public, max-age=300",
+        "Cache-Control": "no-store",
       },
     });
   }
@@ -384,15 +412,16 @@ async function handleJetPhotos(request) {
   if (!upstream.ok) {
     return json({ photos: [], count: 0, unavailable: true, status: upstream.status }, {
       headers: {
-        "Cache-Control": "public, max-age=300",
+        "Cache-Control": "no-store",
       },
     });
   }
 
   const data = await upstream.json();
-  return json(mapJetApiResponse(data, registration), {
+  const mapped = mapJetApiResponse(data, registration);
+  return json(mapped, {
     headers: {
-      "Cache-Control": "public, max-age=3600",
+      "Cache-Control": "no-store",
     },
   });
 }
@@ -424,7 +453,10 @@ export default {
     return env.ASSETS.fetch(request);
   },
   async scheduled(controller, env, ctx) {
-    if (!hasSupabaseConfig(env)) return;
+    if (!hasSupabaseConfig(env) || !isWorkerIngestEnabled(env)) {
+      clearPersistStatus();
+      return;
+    }
     ctx.waitUntil(
       ingestSnapshot(env).catch((error) => {
         recordPersistError("scheduled_ingest", error);
