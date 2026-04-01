@@ -36,6 +36,7 @@ let latestVatsimFetchedAt = 0;
 let latestVatsimObservedAt = 0;
 let vatsimPollInFlight = null;
 let vatsimPollError = null;
+let sessionIdByCallsign = Object.create(null);
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -50,6 +51,9 @@ function loadJsonFile(filePath, fallback) {
 function loadPersistedData() {
   latestPositions = loadJsonFile(LATEST_FILE, Object.create(null));
   aircraftHistory = loadJsonFile(HISTORY_FILE, Object.create(null));
+  for (const [callsign, row] of Object.entries(latestPositions)) {
+    if (row && row.session_id) sessionIdByCallsign[callsign] = row.session_id;
+  }
   for (const points of Object.values(aircraftHistory)) {
     if (!Array.isArray(points) || !points.length) continue;
     const last = points[points.length - 1];
@@ -91,13 +95,7 @@ function cleanupEndedFlights(activeCallsigns) {
   for (const callsign of Object.keys(latestPositions)) {
     if (!activeCallsigns.has(callsign)) {
       delete latestPositions[callsign];
-      delete aircraftHistory[callsign];
-    }
-  }
-
-  for (const callsign of Object.keys(aircraftHistory)) {
-    if (!activeCallsigns.has(callsign)) {
-      delete aircraftHistory[callsign];
+      delete sessionIdByCallsign[callsign];
     }
   }
 }
@@ -109,7 +107,10 @@ function persistRows(rows, observedAt) {
   cleanupEndedFlights(new Set(rows.map((row) => row.callsign)));
 
   for (const row of rows) {
+    if (!sessionIdByCallsign[row.callsign]) sessionIdByCallsign[row.callsign] = row.observedAt;
+    const sessionId = sessionIdByCallsign[row.callsign];
     latestPositions[row.callsign] = {
+      session_id: sessionId,
       observed_at: row.observedAt,
       lat: row.lat,
       lon: row.lon,
@@ -117,8 +118,9 @@ function persistRows(rows, observedAt) {
 
     const points = aircraftHistory[row.callsign] || [];
     const last = points[points.length - 1];
-    if (!last || last.observed_at !== row.observedAt || last.lat !== row.lat || last.lon !== row.lon) {
+    if (!last || last.session_id !== sessionId || last.observed_at !== row.observedAt || last.lat !== row.lat || last.lon !== row.lon) {
       points.push({
+        session_id: sessionId,
         observed_at: row.observedAt,
         lat: row.lat,
         lon: row.lon,
@@ -286,7 +288,10 @@ async function handleApi(req, res) {
     const callsign = String(url.searchParams.get("callsign") || "").trim().toUpperCase();
     const limit = Math.max(50, Math.min(5000, Number(url.searchParams.get("limit") || 2000)));
     const before = Number(url.searchParams.get("before") || 0);
+    const sessionId = latestPositions[callsign] && latestPositions[callsign].session_id;
     let points = Array.isArray(aircraftHistory[callsign]) ? aircraftHistory[callsign] : [];
+    if (sessionId) points = points.filter((point) => point.session_id === sessionId);
+    else points = [];
     if (before > 0) points = points.filter((point) => point.observed_at < before);
     if (points.length > limit) points = points.slice(points.length - limit);
     sendJson(res, 200, {

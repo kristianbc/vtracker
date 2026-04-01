@@ -329,9 +329,29 @@ async function handleHistory(request, env) {
 
   if (!callsign) return json({ error: "callsign_required" }, { status: 400 });
 
+  const latest = await supabaseJsonRequest(env, "GET", "latest_positions", {
+    query: {
+      select: "session_id",
+      callsign: `eq.${callsign}`,
+      limit: 1,
+    },
+  });
+  const sessionId = Number(latest[0] && latest[0].session_id || 0);
+  if (!sessionId) {
+    return json({
+      callsign,
+      points: [],
+    }, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      },
+    });
+  }
+
   const query = {
     select: "observed_at,lat,lon,altitude,groundspeed,heading,squawk,aircraft_code",
     callsign: `eq.${callsign}`,
+    session_id: `eq.${sessionId}`,
     order: "observed_at.desc",
     limit,
   };

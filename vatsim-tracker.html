@@ -1504,6 +1504,7 @@ function applyAircraftVisibility(force){
 var gAirportElevFt = {}; // ICAO -> elevation in feet cache
 var gAirportElevPending = {}; // ICAO -> true if fetch in-flight
 var gSelectedArrivalElev = 0; // elevation ft of selected flight's arrival airport
+var gSelectedTrailAirports = [];
 
 async function fetchAirportElev(icao) {
   if(!icao||icao==='----'||icao==='???')return;
@@ -1529,16 +1530,33 @@ async function fetchAirportElev(icao) {
   if(gSelected){
     var p=gPilots.get(gSelected);
     var arr=p&&p.flight_plan&&p.flight_plan.arrival;
-    if(arr&&arr.toUpperCase()===icao){
-      gSelectedArrivalElev=gAirportElevFt[icao]||0;
+    var dep=p&&p.flight_plan&&p.flight_plan.departure;
+    if((arr&&arr.toUpperCase()===icao) || (dep&&dep.toUpperCase()===icao)){
+      if(arr&&arr.toUpperCase()===icao) gSelectedArrivalElev=gAirportElevFt[icao]||0;
+      updateSelectedTrailAirports(p);
       drawTrailCanvas();
     }
   }
 }
 
+function updateSelectedTrailAirports(p) {
+  gSelectedTrailAirports = [];
+  if(!p||!p.flight_plan) return;
+  [p.flight_plan.departure, p.flight_plan.arrival].forEach(function(code){
+    var ap=trailAirportByCode(code);
+    if(!ap||typeof ap.lat!=='number'||typeof ap.lon!=='number') return;
+    var airportCode=ap.icao||ap.ident||code;
+    gSelectedTrailAirports.push({
+      lat: ap.lat,
+      lon: ap.lon,
+      elev: gAirportElevFt[airportCode]||0
+    });
+  });
+}
+
 function updateSelectedArrivalElev(p) {
   var icao=p&&p.flight_plan&&p.flight_plan.arrival;
-  if(!icao){gSelectedArrivalElev=0;return;}
+  if(!icao){gSelectedArrivalElev=0; gSelectedTrailAirports=[]; return;}
   icao=icao.toUpperCase().trim();
   if(icao in gAirportElevFt){
     gSelectedArrivalElev=gAirportElevFt[icao]||0;
@@ -1546,6 +1564,9 @@ function updateSelectedArrivalElev(p) {
     gSelectedArrivalElev=0;
     fetchAirportElev(icao);
   }
+  var dep=p&&p.flight_plan&&p.flight_plan.departure;
+  if(dep && !(dep.toUpperCase().trim() in gAirportElevFt)) fetchAirportElev(dep);
+  updateSelectedTrailAirports(p);
 }
 
 // ─── TRAIL COLOR (altitude-based, AAL) ────────────────────────────────────────
@@ -1602,6 +1623,8 @@ function trailColAlt(altFt){
 var gTrailPxCache=[];
 var gHoveredDot=-1;
 var MAX_GAP_MS = 5 * 60 * 1000; // gaps > 5 min = missing data, don't connect
+var GROUND_TRAIL_AGL_FT = 250;
+var GROUND_TRAIL_AIRPORT_RADIUS_KM = 80;
 
 // Chaikin subdivision in geo-space: repeatedly cuts corners by replacing each
 // segment with two points at 25% and 75% along it. Produces smooth arcs with
@@ -1628,6 +1651,35 @@ function chaikinSmooth(pts, passes) {
     pts=out;
   }
   return pts;
+}
+
+function trailDistanceKm(lat1, lon1, lat2, lon2){
+  var dLat=(lat2-lat1)*D2R, dLon=(lon2-lon1)*D2R;
+  var a=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(lat1*D2R)*Math.cos(lat2*D2R)*Math.sin(dLon/2)*Math.sin(dLon/2);
+  return 6371*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function trailAirportByCode(code){
+  if(!code) return null;
+  code=String(code).toUpperCase();
+  for(var i=0;i<gAirports.length;i++){
+    var ap=gAirports[i];
+    if(ap.icao===code||ap.ident===code||ap.iata===code) return ap;
+  }
+  return null;
+}
+
+function trailReferenceElevationFt(pt, pilot){
+  var bestElev=gSelectedArrivalElev||0, bestDist=Infinity;
+  var refs=gSelectedTrailAirports.length ? gSelectedTrailAirports : [];
+  refs.forEach(function(ap){
+    var dist=trailDistanceKm(pt.lat, pt.lon, ap.lat, ap.lon);
+    if(dist < bestDist && dist <= GROUND_TRAIL_AIRPORT_RADIUS_KM){
+      bestDist=dist;
+      bestElev=ap.elev||0;
+    }
+  });
+  return bestElev||0;
 }
 
 function drawTrailCanvas(){
@@ -1697,7 +1749,13 @@ function drawTrailCanvas(){
       // Include the last point of the run as start of next to avoid gaps
       if(j<raw.length) run.push(raw[j]);
 
-      var smooth = (turning && run.length>=3) ? chaikinSmooth(run, 2) : run;
+      var groundLikeRun = p && run.some(function(pt){
+        return ((pt.alt||0) - trailReferenceElevationFt(pt, p)) <= GROUND_TRAIL_AGL_FT;
+      });
+      var smooth = run;
+      if(turning && run.length>=3){
+        smooth = groundLikeRun ? chaikinSmooth(run, 1) : chaikinSmooth(run, 2);
+      }
       var px=smooth.map(function(pt){ return gMap.project([pt.lon,pt.lat]); });
 
       for(var k=0;k<smooth.length-1;k++){
@@ -2598,6 +2656,7 @@ function closePanel(){
   applyAircraftVisibility(false);
   gCurrentAircraftRegistration='';
   gSelectedArrivalElev=0;
+  gSelectedTrailAirports=[];
   gTooltipPinnedCallsign=null;
   hideTip(true);
   document.getElementById('panel').classList.remove('open');

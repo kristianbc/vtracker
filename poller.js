@@ -9,6 +9,7 @@ let pollInFlight = false;
 let lastObservedAt = 0;
 let latestPositionsSeen = new Set();
 let lastPersistedPointByCallsign = new Map();
+let sessionIdByCallsign = new Map();
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -69,6 +70,30 @@ function getHistorySampleMs() {
   return Math.max(5 * 1000, raw);
 }
 
+function getGroundHistorySampleMs() {
+  const raw = Number(process.env.GROUND_HISTORY_SAMPLE_MS || 5 * 1000);
+  if (!Number.isFinite(raw)) return 5 * 1000;
+  return Math.max(2 * 1000, raw);
+}
+
+function getTerminalHistorySampleMs() {
+  const raw = Number(process.env.TERMINAL_HISTORY_SAMPLE_MS || 10 * 1000);
+  if (!Number.isFinite(raw)) return 10 * 1000;
+  return Math.max(5 * 1000, raw);
+}
+
+function getLowAltitudeHistorySampleMs() {
+  const raw = Number(process.env.LOW_ALTITUDE_HISTORY_SAMPLE_MS || 15 * 1000);
+  if (!Number.isFinite(raw)) return 15 * 1000;
+  return Math.max(5 * 1000, raw);
+}
+
+function getCruiseHistorySampleMs() {
+  const raw = Number(process.env.CRUISE_HISTORY_SAMPLE_MS || getHistorySampleMs());
+  if (!Number.isFinite(raw)) return getHistorySampleMs();
+  return Math.max(15 * 1000, raw);
+}
+
 function supabaseBaseUrl(env) {
   return String(env.SUPABASE_URL).replace(/\/+$/, "") + "/rest/v1";
 }
@@ -112,6 +137,21 @@ async function supabaseJsonRequest(env, method, table, options = {}) {
   return text ? JSON.parse(text) : [];
 }
 
+async function bootstrapActiveSessions(env) {
+  if (sessionIdByCallsign.size) return;
+  const rows = await supabaseJsonRequest(env, "GET", "latest_positions", {
+    query: {
+      select: "callsign,session_id",
+      limit: 5000,
+    },
+  });
+  for (const row of rows) {
+    const callsign = String(row.callsign || "").trim().toUpperCase();
+    const sessionId = Number(row.session_id || 0);
+    if (callsign && sessionId > 0) sessionIdByCallsign.set(callsign, sessionId);
+  }
+}
+
 function normalizePilotRows(pilots, observedAt) {
   const rows = [];
   for (const pilot of pilots) {
@@ -119,6 +159,7 @@ function normalizePilotRows(pilots, observedAt) {
     if (!callsign || typeof pilot.latitude !== "number" || typeof pilot.longitude !== "number") continue;
     rows.push({
       callsign,
+      session_id: 0,
       observed_at: observedAt,
       lat: pilot.latitude,
       lon: pilot.longitude,
@@ -132,33 +173,108 @@ function normalizePilotRows(pilots, observedAt) {
   return rows;
 }
 
-function shouldPersistHistoryPoint(row, sampleMs) {
+function assignSessionIds(rows, observedAt) {
+  for (const row of rows) {
+    let sessionId = sessionIdByCallsign.get(row.callsign);
+    if (!sessionId) {
+      sessionId = observedAt;
+      sessionIdByCallsign.set(row.callsign, sessionId);
+    }
+    row.session_id = sessionId;
+  }
+}
+
+function angularDifference(a, b) {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+  let diff = Math.abs(a - b) % 360;
+  if (diff > 180) diff = 360 - diff;
+  return diff;
+}
+
+function positionChanged(row, previous) {
+  return Number(row.lat) !== Number(previous.lat) || Number(row.lon) !== Number(previous.lon);
+}
+
+function getAdaptiveHistorySampleMs(row, previous) {
+  const altitude = Number(row.altitude || 0);
+  const groundspeed = Number(row.groundspeed || 0);
+  const headingChange = previous ? angularDifference(Number(row.heading || 0), Number(previous.heading || 0)) : 0;
+  const altitudeChange = previous ? Math.abs(Number(row.altitude || 0) - Number(previous.altitude || 0)) : 0;
+  const speedChange = previous ? Math.abs(Number(row.groundspeed || 0) - Number(previous.groundspeed || 0)) : 0;
+
+  if (groundspeed < 50 || altitude < 1000) return getGroundHistorySampleMs();
+  if (altitude < 5000) return getTerminalHistorySampleMs();
+  if (altitude < 10000) return getLowAltitudeHistorySampleMs();
+  if (headingChange >= 8 || altitudeChange >= 500 || speedChange >= 30) return getLowAltitudeHistorySampleMs();
+  return getCruiseHistorySampleMs();
+}
+
+function shouldPersistHistoryPoint(row) {
   const previous = lastPersistedPointByCallsign.get(row.callsign);
   if (!previous) {
     lastPersistedPointByCallsign.set(row.callsign, {
       observed_at: row.observed_at,
       lat: row.lat,
       lon: row.lon,
+      altitude: row.altitude,
+      groundspeed: row.groundspeed,
+      heading: row.heading,
     });
     return true;
   }
 
-  const enoughTimePassed = row.observed_at - previous.observed_at >= sampleMs;
-  const moved = Math.abs(row.lat - previous.lat) + Math.abs(row.lon - previous.lon) >= 0.02;
-  if (!enoughTimePassed && !moved) return false;
+  if (!positionChanged(row, previous)) return false;
+
+  const sampleMs = getAdaptiveHistorySampleMs(row, previous);
+  const diffMs = row.observed_at - previous.observed_at;
+  const headingChanged = angularDifference(Number(row.heading || 0), Number(previous.heading || 0)) >= 8;
+  const altitudeDelta = Math.abs(Number(row.altitude || 0) - Number(previous.altitude || 0));
+  const speedDelta = Math.abs(Number(row.groundspeed || 0) - Number(previous.groundspeed || 0));
+  const altitude = Number(row.altitude || 0);
+  const groundspeed = Number(row.groundspeed || 0);
+
+  // Preserve surface and terminal geometry aggressively: if it moved, keep it.
+  if (groundspeed < 80 || altitude < 3000) {
+    lastPersistedPointByCallsign.set(row.callsign, {
+      observed_at: row.observed_at,
+      lat: row.lat,
+      lon: row.lon,
+      altitude: row.altitude,
+      groundspeed: row.groundspeed,
+      heading: row.heading,
+    });
+    return true;
+  }
+
+  if (!headingChanged && altitudeDelta < 100 && speedDelta < 5) {
+    if (diffMs < 120 * 1000) return false;
+  } else if (altitude > 30000) {
+    if (diffMs < 30 * 1000) return false;
+  } else if (altitude > 20000) {
+    if (diffMs < 20 * 1000) return false;
+  } else if (altitude > 15000) {
+    if (diffMs < 10 * 1000) return false;
+  } else if (altitude > 10000) {
+    if (diffMs < 7 * 1000) return false;
+  } else if (diffMs < sampleMs) {
+    return false;
+  }
 
   lastPersistedPointByCallsign.set(row.callsign, {
     observed_at: row.observed_at,
     lat: row.lat,
     lon: row.lon,
+    altitude: row.altitude,
+    groundspeed: row.groundspeed,
+    heading: row.heading,
   });
   return true;
 }
 
-function selectTrajectoryRows(rows, sampleMs) {
+function selectTrajectoryRows(rows) {
   const filtered = [];
   for (const row of rows) {
-    if (shouldPersistHistoryPoint(row, sampleMs)) filtered.push(row);
+    if (shouldPersistHistoryPoint(row)) filtered.push(row);
   }
   return filtered;
 }
@@ -169,6 +285,7 @@ async function persistLatestPositions(env, rows) {
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize).map((row) => ({
       callsign: row.callsign,
+      session_id: row.session_id,
       observed_at: row.observed_at,
       lat: row.lat,
       lon: row.lon,
@@ -190,7 +307,7 @@ async function persistTrajectoryPoints(env, rows) {
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
     await supabaseJsonRequest(env, "POST", "aircraft_points", {
-      query: { on_conflict: "callsign,observed_at,lat,lon" },
+      query: { on_conflict: "callsign,session_id,observed_at,lat,lon" },
       body: chunk,
       headers: {
         Prefer: "resolution=ignore-duplicates,return=minimal",
@@ -213,7 +330,10 @@ async function cleanupEndedFlights(env, rows) {
     if (!currentCallsigns.has(callsign)) endedCallsigns.push(callsign);
   }
   latestPositionsSeen = currentCallsigns;
-  for (const callsign of endedCallsigns) lastPersistedPointByCallsign.delete(callsign);
+  for (const callsign of endedCallsigns) {
+    lastPersistedPointByCallsign.delete(callsign);
+    sessionIdByCallsign.delete(callsign);
+  }
 
   if (!endedCallsigns.length) return;
 
@@ -255,7 +375,9 @@ async function ingestSnapshot(env) {
   const pilots = Array.isArray(data.pilots) ? data.pilots : [];
   const observedAt = Date.parse((data.general && data.general.update_timestamp) || "") || Date.now();
   const rows = normalizePilotRows(pilots, observedAt);
-  const trajectoryRows = selectTrajectoryRows(rows, getHistorySampleMs());
+  await bootstrapActiveSessions(env);
+  assignSessionIds(rows, observedAt);
+  const trajectoryRows = selectTrajectoryRows(rows);
 
   if (observedAt <= lastObservedAt) {
     return { observedAt, rows: rows.length, persisted: false, skipped: true };
